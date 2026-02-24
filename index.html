@@ -1,1 +1,1660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Been There Read That</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
+    <style>
+        /* ── Variables ─────────────────────────────────────────────────────── */
+        :root {
+            --bg:           #f9f4ec;
+            --surface:      #ffffff;
+            --surface-warm: #f2ebe0;
+            --brown:        #3d2314;
+            --brown-mid:    #7a4a30;
+            --accent:       #9b2335;
+            --accent-light: #c0392b;
+            --gold:         #b8860b;
+            --gold-light:   #d4a017;
+            --text:         #2c1a0e;
+            --text-mid:     #6b4c38;
+            --text-light:   #a07858;
+            --border:       #e0d4c3;
+            --shadow:       0 2px 12px rgba(61,35,20,0.10);
+            --shadow-lg:    0 8px 32px rgba(61,35,20,0.16);
+            --radius:       14px;
+            --radius-sm:    8px;
+            --ff-display:   'Cormorant Garamond', Georgia, serif;
+            --ff-body:      'DM Sans', system-ui, sans-serif;
+        }
+
+        /* ── Reset ─────────────────────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+            height: 100%;
+            overflow: hidden;
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--ff-body);
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── App shell ─────────────────────────────────────────────────────── */
+        #app {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            max-width: 480px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        /* ── Views ─────────────────────────────────────────────────────────── */
+        .view {
+            display: none;
+            flex-direction: column;
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            animation: fadeIn 0.25s ease;
+        }
+        .view.active { display: flex; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── Header ────────────────────────────────────────────────────────── */
+        .header {
+            background: var(--brown);
+            color: #fff8e8;
+            padding: 16px 20px 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .header-back {
+            background: none;
+            border: none;
+            color: var(--gold-light);
+            font-size: 22px;
+            cursor: pointer;
+            padding: 0 4px;
+            line-height: 1;
+        }
+        .header h1 {
+            font-family: var(--ff-display);
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            flex: 1;
+        }
+        .header-sub {
+            font-family: var(--ff-display);
+            font-size: 13px;
+            font-style: italic;
+            color: var(--gold-light);
+            opacity: 0.9;
+        }
+        .header-action {
+            background: none;
+            border: 1px solid rgba(212,160,23,0.4);
+            border-radius: 20px;
+            color: var(--gold-light);
+            font-family: var(--ff-body);
+            font-size: 13px;
+            padding: 5px 12px;
+            cursor: pointer;
+        }
+
+        /* ── Content area ──────────────────────────────────────────────────── */
+        .content {
+            flex: 1;
+            padding: 20px 16px;
+            overflow-y: auto;
+        }
+
+        /* ── Auth view ─────────────────────────────────────────────────────── */
+        #view-auth {
+            background: var(--brown);
+            justify-content: center;
+            align-items: center;
+            gap: 0;
+        }
+        .auth-top {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 32px 20px;
+            text-align: center;
+        }
+        .auth-icon {
+            font-size: 72px;
+            line-height: 1;
+            margin-bottom: 24px;
+            animation: bookFloat 3s ease-in-out infinite;
+        }
+        @keyframes bookFloat {
+            0%, 100% { transform: translateY(0); }
+            50%       { transform: translateY(-8px); }
+        }
+        .auth-title {
+            font-family: var(--ff-display);
+            font-size: 38px;
+            font-weight: 600;
+            color: #fff8e8;
+            line-height: 1.1;
+            margin-bottom: 8px;
+        }
+        .auth-subtitle {
+            font-family: var(--ff-display);
+            font-style: italic;
+            font-size: 16px;
+            color: var(--gold-light);
+            margin-bottom: 0;
+        }
+        .auth-bottom {
+            padding: 32px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            align-items: center;
+        }
+        .auth-note {
+            font-size: 12px;
+            color: rgba(255,248,232,0.5);
+            text-align: center;
+            max-width: 280px;
+        }
+
+        /* ── Buttons ───────────────────────────────────────────────────────── */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 14px 24px;
+            border-radius: var(--radius);
+            border: none;
+            font-family: var(--ff-body);
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-decoration: none;
+            width: 100%;
+        }
+        .btn:active { transform: scale(0.97); }
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+            box-shadow: 0 4px 16px rgba(155,35,53,0.35);
+        }
+        .btn-primary:hover { background: var(--accent-light); }
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--brown);
+            border: 1.5px solid var(--border);
+        }
+        .btn-google {
+            background: white;
+            color: #3c4043;
+            border: 1.5px solid #dadce0;
+            box-shadow: var(--shadow);
+        }
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-mid);
+            border: 1.5px solid var(--border);
+        }
+        .btn-danger {
+            background: #fdecea;
+            color: var(--accent);
+            border: 1.5px solid #f5c6cb;
+        }
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 13px;
+            width: auto;
+        }
+        .btn-icon {
+            width: 44px;
+            height: 44px;
+            padding: 0;
+            border-radius: 50%;
+            font-size: 20px;
+        }
+
+        /* ── Loading view ──────────────────────────────────────────────────── */
+        #view-loading {
+            background: var(--brown);
+            justify-content: center;
+            align-items: center;
+        }
+        .loading-inner {
+            text-align: center;
+            color: #fff8e8;
+        }
+        .loading-title {
+            font-family: var(--ff-display);
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .loading-msg {
+            font-size: 14px;
+            color: var(--gold-light);
+            margin-bottom: 32px;
+            font-family: var(--ff-display);
+            font-style: italic;
+        }
+        .spinner {
+            width: 44px;
+            height: 44px;
+            border: 3px solid rgba(212,160,23,0.25);
+            border-top-color: var(--gold-light);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Home view ─────────────────────────────────────────────────────── */
+        .home-welcome {
+            background: var(--surface-warm);
+            border-bottom: 1px solid var(--border);
+            padding: 20px 16px 16px;
+            flex-shrink: 0;
+        }
+        .home-welcome p {
+            font-family: var(--ff-display);
+            font-style: italic;
+            font-size: 15px;
+            color: var(--text-mid);
+        }
+        .home-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding: 20px 16px;
+        }
+        .action-card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1.5px solid var(--border);
+            padding: 20px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-shadow: var(--shadow);
+        }
+        .action-card:active { transform: scale(0.96); border-color: var(--accent); }
+        .action-card-icon { font-size: 36px; line-height: 1; margin-bottom: 10px; }
+        .action-card-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--brown);
+            margin-bottom: 4px;
+        }
+        .action-card-sub {
+            font-size: 12px;
+            color: var(--text-light);
+        }
+        .queue-badge-row {
+            padding: 0 16px 16px;
+        }
+        .queue-badge {
+            background: var(--surface-warm);
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+        }
+        .queue-badge:active { border-color: var(--accent); }
+        .queue-count {
+            background: var(--accent);
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .queue-label { font-size: 14px; color: var(--text-mid); flex: 1; }
+        .queue-arrow { color: var(--text-light); font-size: 18px; }
+
+        /* ── Search view ───────────────────────────────────────────────────── */
+        .search-bar-wrap {
+            padding: 16px;
+            background: var(--surface-warm);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .search-input-row {
+            display: flex;
+            gap: 8px;
+        }
+        .search-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            font-family: var(--ff-body);
+            font-size: 15px;
+            background: var(--surface);
+            color: var(--text);
+            outline: none;
+        }
+        .search-input:focus { border-color: var(--brown-mid); }
+        .search-go {
+            padding: 12px 18px;
+            background: var(--brown);
+            color: white;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 18px;
+            cursor: pointer;
+        }
+
+        /* ── Results ───────────────────────────────────────────────────────── */
+        .results-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .book-card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1.5px solid var(--border);
+            padding: 14px 16px;
+            box-shadow: var(--shadow);
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+        .book-card:active { border-color: var(--brown-mid); }
+        .book-card-title {
+            font-family: var(--ff-display);
+            font-size: 17px;
+            font-weight: 600;
+            color: var(--brown);
+            margin-bottom: 4px;
+            line-height: 1.3;
+        }
+        .book-card-author {
+            font-size: 13px;
+            color: var(--text-mid);
+            margin-bottom: 6px;
+        }
+        .book-card-meta {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .tag {
+            background: var(--surface-warm);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 3px 10px;
+            font-size: 11px;
+            color: var(--text-mid);
+        }
+        .tag-accent {
+            background: #fdecea;
+            border-color: #f5c6cb;
+            color: var(--accent);
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-light);
+        }
+        .empty-state-icon { font-size: 48px; margin-bottom: 12px; }
+        .empty-state p { font-family: var(--ff-display); font-style: italic; font-size: 16px; }
+
+        /* ── Book detail ───────────────────────────────────────────────────── */
+        .book-detail-hero {
+            background: var(--brown);
+            padding: 24px 20px;
+            color: #fff8e8;
+        }
+        .book-detail-title {
+            font-family: var(--ff-display);
+            font-size: 28px;
+            font-weight: 600;
+            line-height: 1.2;
+            margin-bottom: 8px;
+        }
+        .book-detail-author {
+            font-family: var(--ff-display);
+            font-style: italic;
+            font-size: 16px;
+            color: var(--gold-light);
+            margin-bottom: 4px;
+        }
+        .book-detail-meta-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+        .tag-light {
+            background: rgba(255,248,232,0.15);
+            border: 1px solid rgba(212,160,23,0.3);
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 12px;
+            color: rgba(255,248,232,0.9);
+        }
+        .in-library-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(46,160,67,0.2);
+            border: 1px solid rgba(46,160,67,0.4);
+            color: #7ed89a;
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .not-in-library-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(155,35,53,0.2);
+            border: 1px solid rgba(155,35,53,0.4);
+            color: #f08a8a;
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .book-detail-body { padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; }
+        .detail-section { margin-bottom: 8px; }
+        .detail-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-light);
+            margin-bottom: 4px;
+        }
+        .detail-value { font-size: 15px; color: var(--text); }
+        .isbn-list { display: flex; flex-direction: column; gap: 6px; }
+        .isbn-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--surface-warm);
+            border-radius: var(--radius-sm);
+            padding: 8px 12px;
+        }
+        .isbn-code { font-family: monospace; font-size: 14px; flex: 1; }
+        .isbn-format { font-size: 12px; color: var(--text-light); }
+
+        /* ── Scanner view ──────────────────────────────────────────────────── */
+        #view-scan {
+            background: #000;
+            position: relative;
+        }
+        #scan-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            position: absolute;
+            top: 0; left: 0;
+        }
+        .scan-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+        .scan-frame {
+            width: 260px;
+            height: 160px;
+            border: 2px solid rgba(212,160,23,0.8);
+            border-radius: 12px;
+            box-shadow: 0 0 0 2000px rgba(0,0,0,0.55);
+            position: relative;
+        }
+        .scan-frame::before, .scan-frame::after,
+        .scan-frame > span::before, .scan-frame > span::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-color: var(--gold-light);
+            border-style: solid;
+        }
+        .scan-frame::before  { top: -2px; left: -2px;  border-width: 3px 0 0 3px; border-radius: 10px 0 0 0; }
+        .scan-frame::after   { top: -2px; right: -2px; border-width: 3px 3px 0 0; border-radius: 0 10px 0 0; }
+        .scan-frame > span::before  { bottom: -2px; left: -2px;  border-width: 0 0 3px 3px; border-radius: 0 0 0 10px; }
+        .scan-frame > span::after   { bottom: -2px; right: -2px; border-width: 0 3px 3px 0; border-radius: 0 0 10px 0; }
+        .scan-line {
+            position: absolute;
+            left: 4px; right: 4px;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--gold-light), transparent);
+            animation: scanLine 2s ease-in-out infinite;
+        }
+        @keyframes scanLine {
+            0%   { top: 8px; opacity: 0; }
+            10%  { opacity: 1; }
+            90%  { opacity: 1; }
+            100% { top: calc(100% - 10px); opacity: 0; }
+        }
+        .scan-hint {
+            color: white;
+            font-size: 14px;
+            margin-top: 24px;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+            text-align: center;
+        }
+        .scan-cancel {
+            position: absolute;
+            bottom: 48px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.6);
+            border: 1.5px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 12px 32px;
+            border-radius: var(--radius);
+            font-size: 15px;
+            cursor: pointer;
+            z-index: 20;
+        }
+        .scan-header {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            padding: 16px 20px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
+            color: white;
+            font-family: var(--ff-display);
+            font-size: 20px;
+            font-weight: 600;
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* ── Add book form ─────────────────────────────────────────────────── */
+        .form-group { margin-bottom: 16px; }
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: var(--text-mid);
+            margin-bottom: 6px;
+        }
+        .form-input {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-family: var(--ff-body);
+            font-size: 15px;
+            background: var(--surface);
+            color: var(--text);
+            outline: none;
+        }
+        .form-input:focus { border-color: var(--brown-mid); }
+        .isbn-add-row {
+            display: flex;
+            gap: 8px;
+        }
+        .isbn-add-row .form-input { flex: 1; }
+        .isbn-entry {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--surface-warm);
+            border-radius: var(--radius-sm);
+            margin-bottom: 6px;
+        }
+        .isbn-entry-text { flex: 1; font-size: 14px; font-family: monospace; }
+        .isbn-remove {
+            background: none;
+            border: none;
+            color: var(--accent);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+        .form-select {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-family: var(--ff-body);
+            font-size: 15px;
+            background: var(--surface);
+            color: var(--text);
+            outline: none;
+            appearance: none;
+        }
+        .from-scan-banner {
+            background: #eaf6ed;
+            border: 1.5px solid #b8e0c2;
+            border-radius: var(--radius);
+            padding: 12px 16px;
+            font-size: 13px;
+            color: #2e7d52;
+            margin-bottom: 16px;
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+
+        /* ── Queue view ────────────────────────────────────────────────────── */
+        .queue-item {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1.5px solid var(--border);
+            padding: 14px 16px;
+            box-shadow: var(--shadow);
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+        .queue-item-info { flex: 1; min-width: 0; }
+        .queue-item-title {
+            font-family: var(--ff-display);
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--brown);
+            margin-bottom: 3px;
+        }
+        .queue-item-author { font-size: 13px; color: var(--text-mid); }
+        .queue-item-remove {
+            background: none;
+            border: none;
+            color: var(--text-light);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 0;
+            flex-shrink: 0;
+        }
+        .queue-item-remove:active { color: var(--accent); }
+        .queue-footer {
+            padding: 16px;
+            border-top: 1px solid var(--border);
+            background: var(--surface);
+            flex-shrink: 0;
+        }
+        .sync-status {
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-light);
+            margin-top: 10px;
+            font-family: var(--ff-display);
+            font-style: italic;
+        }
+        .sync-status.success { color: #2e7d52; }
+        .sync-status.error   { color: var(--accent); }
+
+        /* ── Toast ─────────────────────────────────────────────────────────── */
+        #toast {
+            position: fixed;
+            bottom: 32px;
+            left: 50%;
+            transform: translateX(-50%) translateY(80px);
+            background: var(--brown);
+            color: #fff8e8;
+            padding: 12px 20px;
+            border-radius: var(--radius);
+            font-size: 14px;
+            font-weight: 500;
+            white-space: nowrap;
+            z-index: 1000;
+            transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1);
+            pointer-events: none;
+            box-shadow: var(--shadow-lg);
+        }
+        #toast.show { transform: translateX(-50%) translateY(0); }
+
+        /* ── Divider ───────────────────────────────────────────────────────── */
+        .divider {
+            height: 1px;
+            background: var(--border);
+            margin: 16px 0;
+        }
+
+        /* ── Utility ───────────────────────────────────────────────────────── */
+        .text-center { text-align: center; }
+        .mt-4 { margin-top: 16px; }
+        .mb-4 { margin-bottom: 16px; }
+        .gap-2 { display: flex; flex-direction: column; gap: 8px; }
+        .row { display: flex; gap: 10px; }
+        .row .btn { flex: 1; }
+    </style>
+</head>
+<body>
+<div id="app">
+
+    <!-- ── Toast ──────────────────────────────────────────────────────────── -->
+    <div id="toast"></div>
+
+    <!-- ── Auth ───────────────────────────────────────────────────────────── -->
+    <div id="view-auth" class="view active">
+        <div class="auth-top">
+            <div class="auth-icon">📚</div>
+            <div class="auth-title">Been There<br>Read That</div>
+            <div class="auth-subtitle">Dixie's Library</div>
+        </div>
+        <div class="auth-bottom">
+            <button class="btn btn-google" onclick="signIn()">
+                <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.347 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+                Sign in with Google
+            </button>
+            <p class="auth-note">Your library data stays on your Google Drive. We only access files this app creates.</p>
+        </div>
+    </div>
+
+    <!-- ── Loading ─────────────────────────────────────────────────────────── -->
+    <div id="view-loading" class="view">
+        <div class="loading-inner">
+            <div class="loading-title">Loading your library</div>
+            <div id="loading-msg" class="loading-msg">Connecting to Google Drive...</div>
+            <div class="spinner"></div>
+        </div>
+    </div>
+
+    <!-- ── Home ────────────────────────────────────────────────────────────── -->
+    <div id="view-home" class="view">
+        <div class="header">
+            <h1>📚 Been There Read That</h1>
+            <button class="header-action" onclick="showView('view-settings')">⚙</button>
+        </div>
+        <div class="home-welcome">
+            <p id="home-quip">What are we reading today?</p>
+        </div>
+        <div class="home-actions">
+            <div class="action-card" onclick="showView('view-search')">
+                <div class="action-card-icon">🔍</div>
+                <div class="action-card-title">Search</div>
+                <div class="action-card-sub">Find a book</div>
+            </div>
+            <div class="action-card" onclick="startScan()">
+                <div class="action-card-icon">📷</div>
+                <div class="action-card-title">Scan Barcode</div>
+                <div class="action-card-sub">Check by ISBN</div>
+            </div>
+            <div class="action-card" onclick="showAddBook(null)">
+                <div class="action-card-icon">➕</div>
+                <div class="action-card-title">Add a Book</div>
+                <div class="action-card-sub">Add manually</div>
+            </div>
+            <div class="action-card" onclick="refreshDatabase()">
+                <div class="action-card-icon">🔄</div>
+                <div class="action-card-title">Refresh</div>
+                <div class="action-card-sub">Reload library</div>
+            </div>
+        </div>
+        <div class="queue-badge-row" id="queue-badge-row" style="display:none">
+            <div class="queue-badge" onclick="showView('view-queue')">
+                <div class="queue-count" id="queue-count">0</div>
+                <div class="queue-label">Books waiting to sync to desktop</div>
+                <div class="queue-arrow">›</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Search ──────────────────────────────────────────────────────────── -->
+    <div id="view-search" class="view">
+        <div class="header">
+            <button class="header-back" onclick="showView('view-home')">‹</button>
+            <h1>Search</h1>
+        </div>
+        <div class="search-bar-wrap">
+            <div class="search-input-row">
+                <input id="search-input" class="search-input" type="search"
+                    placeholder="Title, author, series…"
+                    onkeydown="if(event.key==='Enter') doSearch()"
+                    autofocus>
+                <button class="search-go" onclick="doSearch()">→</button>
+            </div>
+        </div>
+        <div class="content">
+            <div id="search-results" class="results-list">
+                <div class="empty-state">
+                    <div class="empty-state-icon">🔍</div>
+                    <p>Search your library above</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Book Detail ─────────────────────────────────────────────────────── -->
+    <div id="view-book" class="view">
+        <div class="header">
+            <button class="header-back" id="book-back-btn" onclick="showView('view-search')">‹</button>
+            <h1>Book Details</h1>
+        </div>
+        <div id="book-detail-content"></div>
+    </div>
+
+    <!-- ── Scan ────────────────────────────────────────────────────────────── -->
+    <div id="view-scan" class="view">
+        <div class="scan-header">
+            <button style="background:none;border:none;color:white;font-size:22px;cursor:pointer" onclick="stopScan()">‹</button>
+            Scan Barcode
+        </div>
+        <video id="scan-video" playsinline></video>
+        <div class="scan-overlay">
+            <div class="scan-frame">
+                <span></span>
+                <div class="scan-line"></div>
+            </div>
+            <div class="scan-hint">Point at the book's barcode</div>
+        </div>
+        <button class="scan-cancel" onclick="stopScan()">Cancel</button>
+    </div>
+
+    <!-- ── Add Book ────────────────────────────────────────────────────────── -->
+    <div id="view-add-book" class="view">
+        <div class="header">
+            <button class="header-back" onclick="showView('view-home')">‹</button>
+            <h1>Add to Library</h1>
+        </div>
+        <div class="content">
+            <div id="scan-source-banner" class="from-scan-banner" style="display:none">
+                <span>📷</span>
+                <span>Details filled in from barcode scan. Review and confirm below.</span>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Title *</label>
+                <input id="add-title" class="form-input" type="text" placeholder="Book title">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Author First Name *</label>
+                <input id="add-first-name" class="form-input" type="text" placeholder="First name(s)">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Author Last Name *</label>
+                <input id="add-last-name" class="form-input" type="text" placeholder="Last name">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Series Name</label>
+                <input id="add-series" class="form-input" type="text" placeholder="Leave blank if standalone">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Series Number</label>
+                <input id="add-series-num" class="form-input" type="number" placeholder="e.g. 1">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Publication Year</label>
+                <input id="add-year" class="form-input" type="number" placeholder="e.g. 2023" maxlength="4">
+            </div>
+            <div class="form-group">
+                <label class="form-label">ISBNs</label>
+                <div id="isbn-entries"></div>
+                <div class="isbn-add-row mt-4">
+                    <input id="new-isbn" class="form-input" type="text" placeholder="ISBN-13 or ISBN-10">
+                    <select id="new-isbn-format" class="form-select" style="width:130px">
+                        <option value="paperback">Paperback</option>
+                        <option value="hardcover">Hardcover</option>
+                        <option value="ebook">eBook</option>
+                        <option value="">Unknown</option>
+                    </select>
+                    <button class="btn btn-secondary btn-sm" onclick="addIsbnEntry()" style="flex-shrink:0">Add</button>
+                </div>
+            </div>
+            <div class="divider"></div>
+            <div class="gap-2">
+                <button class="btn btn-primary" onclick="submitAddBook()">Add to Queue</button>
+                <button class="btn btn-ghost" onclick="showView('view-home')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Queue ───────────────────────────────────────────────────────────── -->
+    <div id="view-queue" class="view">
+        <div class="header">
+            <button class="header-back" onclick="showView('view-home')">‹</button>
+            <h1>Pending Books</h1>
+            <div class="header-sub" id="queue-header-count"></div>
+        </div>
+        <div class="content" style="padding-bottom:0">
+            <div id="queue-list" class="results-list"></div>
+        </div>
+        <div class="queue-footer">
+            <button class="btn btn-primary" onclick="syncQueueToDrive()" id="sync-btn">
+                ☁ Sync to Desktop
+            </button>
+            <div id="sync-status" class="sync-status"></div>
+        </div>
+    </div>
+
+    <!-- ── Settings ────────────────────────────────────────────────────────── -->
+    <div id="view-settings" class="view">
+        <div class="header">
+            <button class="header-back" onclick="showView('view-home')">‹</button>
+            <h1>Settings</h1>
+        </div>
+        <div class="content gap-2">
+            <div class="detail-section">
+                <div class="detail-label">Signed in as</div>
+                <div class="detail-value" id="settings-email">—</div>
+            </div>
+            <div class="divider"></div>
+            <button class="btn btn-secondary" onclick="refreshDatabase()">🔄 Reload Database from Drive</button>
+            <button class="btn btn-danger" onclick="signOut()">Sign Out</button>
+        </div>
+    </div>
+
+</div><!-- /app -->
+
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   CONFIGURATION — fill these in before deploying
+   ═════════════════════════════════════════════════════════════════ */
+const CONFIG = {
+    CLIENT_ID: '598152021591-fbv9t7ka6o2fsqcj5u7lrr19dcvd1e1n.apps.googleusercontent.com',
+    // Name of the Drive folder the desktop app uses:
+    DRIVE_FOLDER_NAME: 'BeenThereReadThat',
+    // Name of the current DB file uploaded by the desktop app:
+    CURRENT_DB_FILENAME: 'current_db.db',
+    PENDING_FILENAME: 'pending_changes.json',
+};
+
+/* ════════════════════════════════════════════════════════════════════
+   STATE
+   ═════════════════════════════════════════════════════════════════ */
+const state = {
+    accessToken: null,
+    userEmail:   null,
+    db:          null,   // sql.js Database instance
+    SQL:         null,   // sql.js module
+    folderId:    null,
+    queue:       [],     // pending changes array
+    scanResult:  null,   // last scanned ISBN result
+};
+
+/* ════════════════════════════════════════════════════════════════════
+   NAVIGATION
+   ═════════════════════════════════════════════════════════════════ */
+function showView(id) {
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    // Refresh queue badge on home
+    if (id === 'view-home') updateQueueBadge();
+    if (id === 'view-queue') renderQueue();
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   TOAST
+   ═════════════════════════════════════════════════════════════════ */
+let toastTimer;
+function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   GOOGLE AUTH (Identity Services — token model)
+   ═════════════════════════════════════════════════════════════════ */
+let tokenClient;
+
+function initAuth() {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CONFIG.CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/drive.file email profile',
+        callback: async (resp) => {
+            if (resp.error) { showToast('Sign in failed: ' + resp.error); return; }
+            state.accessToken = resp.access_token;
+            await loadUserInfo();
+            await startup();
+        },
+    });
+}
+
+function signIn() {
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+function signOut() {
+    if (state.accessToken) {
+        google.accounts.oauth2.revoke(state.accessToken);
+    }
+    state.accessToken = null;
+    state.userEmail = null;
+    state.db = null;
+    state.folderId = null;
+    showView('view-auth');
+}
+
+async function loadUserInfo() {
+    try {
+        const r = await gFetch('https://www.googleapis.com/oauth2/v3/userinfo');
+        state.userEmail = r.email;
+        document.getElementById('settings-email').textContent = r.email || '—';
+    } catch(e) {}
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   DRIVE API HELPERS
+   ═════════════════════════════════════════════════════════════════ */
+async function gFetch(url, options = {}) {
+    const resp = await fetch(url, {
+        ...options,
+        headers: {
+            'Authorization': 'Bearer ' + state.accessToken,
+            ...(options.headers || {})
+        }
+    });
+    if (!resp.ok) throw new Error(`Drive API error: ${resp.status}`);
+    const ct = resp.headers.get('content-type') || '';
+    if (ct.includes('application/json')) return resp.json();
+    return resp;
+}
+
+async function getOrCreateFolder() {
+    if (state.folderId) return state.folderId;
+    const name = CONFIG.DRIVE_FOLDER_NAME;
+    const q = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    const r = await gFetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`);
+    if (r.files && r.files.length > 0) {
+        state.folderId = r.files[0].id;
+    } else {
+        const created = await gFetch('https://www.googleapis.com/drive/v3/files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' })
+        });
+        state.folderId = created.id;
+    }
+    return state.folderId;
+}
+
+async function findFileInFolder(filename) {
+    const folderId = await getOrCreateFolder();
+    const q = `name='${filename}' and '${folderId}' in parents and trashed=false`;
+    const r = await gFetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`);
+    return (r.files && r.files.length > 0) ? r.files[0].id : null;
+}
+
+async function downloadFileAsBuffer(fileId) {
+    const resp = await gFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+    return resp.arrayBuffer();
+}
+
+async function uploadJsonToDrive(filename, data) {
+    const folderId = await getOrCreateFolder();
+    const body = JSON.stringify(data, null, 2);
+    const blob = new Blob([body], { type: 'application/json' });
+    const existingId = await findFileInFolder(filename);
+    if (existingId) {
+        await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media`, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': 'Bearer ' + state.accessToken,
+                'Content-Type': 'application/json'
+            },
+            body: blob
+        });
+    } else {
+        const meta = { name: filename, parents: [folderId] };
+        const form = new FormData();
+        form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
+        form.append('file', blob);
+        await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + state.accessToken },
+            body: form
+        });
+    }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   STARTUP — load sql.js + download DB
+   ═════════════════════════════════════════════════════════════════ */
+async function startup() {
+    showView('view-loading');
+    setLoadingMsg('Loading SQL engine...');
+    try {
+        state.SQL = await initSqlJs({
+            locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}`
+        });
+    } catch(e) {
+        showToast('Failed to load SQL engine');
+        showView('view-auth');
+        return;
+    }
+    await loadDatabase();
+    loadQueueFromStorage();
+    showView('view-home');
+}
+
+async function loadDatabase() {
+    setLoadingMsg('Downloading your library from Drive...');
+    try {
+        const fileId = await findFileInFolder(CONFIG.CURRENT_DB_FILENAME);
+        if (!fileId) {
+            showToast('No library found on Drive. Ask desktop app to sync first.');
+            state.db = null;
+            return;
+        }
+        const buffer = await downloadFileAsBuffer(fileId);
+        state.db = new state.SQL.Database(new Uint8Array(buffer));
+    } catch(e) {
+        showToast('Could not load library: ' + e.message);
+        state.db = null;
+    }
+}
+
+async function refreshDatabase() {
+    showView('view-loading');
+    await loadDatabase();
+    showView('view-home');
+    showToast('Library refreshed!');
+}
+
+function setLoadingMsg(msg) {
+    document.getElementById('loading-msg').textContent = msg;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   DATABASE QUERIES (sql.js)
+   Note: uses || for concatenation — sql.js doesn't support concat()
+   ═════════════════════════════════════════════════════════════════ */
+function dbSearch(query) {
+    if (!state.db) return [];
+    const sql = `
+        SELECT 
+            Books.ID,
+            Books.name as title,
+            Books.multiple,
+            Books.multiple_list,
+            Books.single_author as single_author_id,
+            COALESCE(Authors.first_name || ' ' || Authors.last_name, 'Multiple Authors') as author_display,
+            COALESCE(Series.name, '') as series_name,
+            COALESCE(Books.series_number, '') as series_number,
+            COALESCE(Universe.name, '') as universe,
+            COALESCE(Books.publication_year, '') as year,
+            COALESCE(Books.rating, '') as rating
+        FROM Books
+        LEFT JOIN Authors ON Authors.ID = Books.single_author
+        LEFT JOIN Series  ON Series.ID  = Books.series_name
+        LEFT JOIN Universe ON Universe.ID = Books.universe
+        WHERE Books.name LIKE :q
+           OR Authors.last_name LIKE :q
+           OR Authors.first_name LIKE :q
+           OR Series.name LIKE :q
+        GROUP BY Books.ID
+        ORDER BY Books.name`;
+    try {
+        const stmt = state.db.prepare(sql);
+        const results = [];
+        stmt.bind({ ':q': `%${query}%` });
+        while (stmt.step()) results.push(stmt.getAsObject());
+        stmt.free();
+        return results;
+    } catch(e) {
+        console.error('Query error:', e);
+        return [];
+    }
+}
+
+function dbSearchByIsbn(isbn) {
+    if (!state.db) return null;
+    try {
+        // Try ISBN table first
+        const isbnSql = `
+            SELECT Books.ID, Books.name as title,
+                COALESCE(Authors.first_name || ' ' || Authors.last_name, 'Multiple Authors') as author_display,
+                COALESCE(Series.name,'') as series_name,
+                COALESCE(Books.series_number,'') as series_number,
+                COALESCE(Books.publication_year,'') as year
+            FROM ISBN
+            JOIN Books ON Books.ID = ISBN.book_id
+            LEFT JOIN Authors ON Authors.ID = Books.single_author
+            LEFT JOIN Series ON Series.ID = Books.series_name
+            WHERE ISBN.isbn = :isbn`;
+        const stmt = state.db.prepare(isbnSql);
+        stmt.bind({ ':isbn': isbn });
+        const results = [];
+        while (stmt.step()) results.push(stmt.getAsObject());
+        stmt.free();
+        return results.length > 0 ? results[0] : null;
+    } catch(e) {
+        // ISBN table may not exist yet
+        return null;
+    }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   SEARCH UI
+   ═════════════════════════════════════════════════════════════════ */
+function doSearch() {
+    const q = document.getElementById('search-input').value.trim();
+    if (!q) return;
+    if (!state.db) { showToast('Library not loaded — try refreshing.'); return; }
+    const results = dbSearch(q);
+    renderSearchResults(results);
+}
+
+function renderSearchResults(results) {
+    const container = document.getElementById('search-results');
+    if (results.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">🔍</div>
+                <p>No books found</p>
+            </div>`;
+        return;
+    }
+    container.innerHTML = results.map(b => `
+        <div class="book-card" onclick="showBookDetail(${b.ID}, 'view-search')">
+            <div class="book-card-title">${esc(b.title)}</div>
+            <div class="book-card-author">${esc(b.author_display)}</div>
+            <div class="book-card-meta">
+                ${b.series_name ? `<span class="tag">${esc(b.series_name)} #${esc(b.series_number)}</span>` : ''}
+                ${b.year ? `<span class="tag">${esc(b.year)}</span>` : ''}
+                ${b.rating ? `<span class="tag">★ ${esc(b.rating)}</span>` : ''}
+            </div>
+        </div>`).join('');
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   BOOK DETAIL
+   ═════════════════════════════════════════════════════════════════ */
+function showBookDetail(bookId, backView) {
+    if (!state.db) return;
+    const sql = `
+        SELECT Books.ID, Books.name as title, Books.multiple,
+            Books.multiple_list,
+            Books.single_author as single_author_id,
+            COALESCE(Authors.first_name || ' ' || Authors.last_name,'Multiple Authors') as author_display,
+            COALESCE(Series.name,'') as series_name,
+            COALESCE(Books.series_number,'') as series_number,
+            COALESCE(Universe.name,'') as universe,
+            COALESCE(Books.publication_year,'') as year,
+            COALESCE(Books.rating,'') as rating
+        FROM Books
+        LEFT JOIN Authors ON Authors.ID = Books.single_author
+        LEFT JOIN Series ON Series.ID = Books.series_name
+        LEFT JOIN Universe ON Universe.ID = Books.universe
+        WHERE Books.ID = :id`;
+    const stmt = state.db.prepare(sql);
+    stmt.bind({ ':id': bookId });
+    let book = null;
+    if (stmt.step()) book = stmt.getAsObject();
+    stmt.free();
+    if (!book) return;
+
+    // Try to get ISBNs
+    let isbns = [];
+    try {
+        const iStmt = state.db.prepare('SELECT isbn, format FROM ISBN WHERE book_id = :id');
+        iStmt.bind({ ':id': bookId });
+        while (iStmt.step()) isbns.push(iStmt.getAsObject());
+        iStmt.free();
+    } catch(e) {}
+
+    document.getElementById('book-back-btn').onclick = () => showView(backView);
+    document.getElementById('book-detail-content').innerHTML = `
+        <div class="book-detail-hero">
+            <div class="book-detail-title">${esc(book.title)}</div>
+            <div class="book-detail-author">${esc(book.author_display)}</div>
+            <div class="book-detail-meta-row">
+                ${book.series_name ? `<span class="tag-light">${esc(book.series_name)} #${esc(book.series_number)}</span>` : ''}
+                ${book.universe ? `<span class="tag-light">${esc(book.universe)}</span>` : ''}
+                ${book.year ? `<span class="tag-light">${esc(book.year)}</span>` : ''}
+                ${book.rating ? `<span class="tag-light">★ ${esc(book.rating)}</span>` : ''}
+                <span class="in-library-badge">✓ In your library</span>
+            </div>
+        </div>
+        <div class="book-detail-body">
+            ${isbns.length > 0 ? `
+            <div class="detail-section">
+                <div class="detail-label">ISBNs</div>
+                <div class="isbn-list">
+                    ${isbns.map(i => `
+                    <div class="isbn-row">
+                        <span class="isbn-code">${esc(i.isbn)}</span>
+                        <span class="isbn-format">${esc(i.format || '')}</span>
+                    </div>`).join('')}
+                </div>
+            </div>` : ''}
+        </div>`;
+    showView('view-book');
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   BARCODE SCANNING (ZXing)
+   ═════════════════════════════════════════════════════════════════ */
+let codeReader = null;
+
+async function startScan() {
+    showView('view-scan');
+    try {
+        codeReader = new ZXing.BrowserMultiFormatReader();
+        const videoEl = document.getElementById('scan-video');
+        const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
+        // Prefer back camera
+        const device = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
+        const deviceId = device ? device.deviceId : undefined;
+        codeReader.decodeFromVideoDevice(deviceId, videoEl, (result, err) => {
+            if (result) {
+                const text = result.getText();
+                // Accept EAN-13 (ISBN-13) or ISBN-10 patterns
+                if (/^97[89]\d{10}$/.test(text) || /^\d{9}[\dX]$/.test(text)) {
+                    handleScannedIsbn(text);
+                }
+            }
+        });
+    } catch(e) {
+        showToast('Camera not available: ' + e.message);
+        showView('view-home');
+    }
+}
+
+function stopScan() {
+    if (codeReader) { codeReader.reset(); codeReader = null; }
+    showView('view-home');
+}
+
+async function handleScannedIsbn(isbn) {
+    stopScan();
+    showToast('Scanned: ' + isbn);
+
+    // Check local DB first
+    const localMatch = dbSearchByIsbn(isbn);
+    if (localMatch) {
+        showBookDetail(localMatch.ID, 'view-home');
+        return;
+    }
+
+    // Also check by title if Google Books gives us one
+    const bookData = await lookupIsbn(isbn);
+    if (bookData) {
+        // Check if title exists in DB
+        const titleResults = dbSearch(bookData.title);
+        if (titleResults.length === 1) {
+            // Clear match by title — show it as found
+            showBookDetail(titleResults[0].ID, 'view-home');
+            return;
+        } else if (titleResults.length > 1) {
+            // Multiple possible matches — show search results
+            renderSearchResults(titleResults);
+            document.getElementById('search-input').value = bookData.title;
+            showView('view-search');
+            return;
+        }
+        // Not in library — offer to add
+        showAddBook(bookData, isbn);
+    } else {
+        // ISBN lookup failed — offer manual add with just the ISBN
+        showAddBook(null, isbn);
+    }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   GOOGLE BOOKS API
+   ═════════════════════════════════════════════════════════════════ */
+async function lookupIsbn(isbn) {
+    try {
+        const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+        if (!data.items || data.items.length === 0) return null;
+        const info = data.items[0].volumeInfo;
+        const authors = (info.authors || ['Unknown Author']).map(a => {
+            const parts = a.trim().split(' ');
+            return {
+                first_name: parts.slice(0, -1).join(' ') || a,
+                last_name:  parts.length > 1 ? parts[parts.length - 1] : '',
+                in_db: false
+            };
+        });
+        return {
+            title:       info.title || '',
+            authors:     authors,
+            year:        info.publishedDate ? info.publishedDate.substring(0, 4) : '',
+            series_name: '',
+            series_number: '',
+            universe:    '',
+        };
+    } catch(e) {
+        return null;
+    }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   ADD BOOK
+   ═════════════════════════════════════════════════════════════════ */
+let addBookIsbns = [];
+
+function showAddBook(bookData, scannedIsbn = null) {
+    addBookIsbns = [];
+    document.getElementById('add-title').value      = bookData ? bookData.title : '';
+    document.getElementById('add-first-name').value = bookData && bookData.authors[0] ? bookData.authors[0].first_name : '';
+    document.getElementById('add-last-name').value  = bookData && bookData.authors[0] ? bookData.authors[0].last_name  : '';
+    document.getElementById('add-series').value     = bookData ? bookData.series_name    : '';
+    document.getElementById('add-series-num').value = bookData ? bookData.series_number  : '';
+    document.getElementById('add-year').value       = bookData ? bookData.year           : '';
+    const banner = document.getElementById('scan-source-banner');
+    banner.style.display = scannedIsbn ? 'flex' : 'none';
+    if (scannedIsbn) {
+        // Pre-populate first ISBN with scanned value
+        addBookIsbns = [{ isbn: scannedIsbn, format: 'paperback' }];
+    }
+    document.getElementById('new-isbn').value = '';
+    renderIsbnEntries();
+    showView('view-add-book');
+}
+
+function addIsbnEntry() {
+    const val = document.getElementById('new-isbn').value.trim();
+    const fmt = document.getElementById('new-isbn-format').value;
+    if (!val) return;
+    if (!/^[\d\-X]{9,17}$/.test(val.replace(/-/g,''))) {
+        showToast('That doesn\'t look like a valid ISBN');
+        return;
+    }
+    const clean = val.replace(/-/g, '');
+    if (addBookIsbns.find(i => i.isbn === clean)) {
+        showToast('ISBN already added');
+        return;
+    }
+    addBookIsbns.push({ isbn: clean, format: fmt });
+    document.getElementById('new-isbn').value = '';
+    renderIsbnEntries();
+}
+
+function removeIsbnEntry(idx) {
+    addBookIsbns.splice(idx, 1);
+    renderIsbnEntries();
+}
+
+function renderIsbnEntries() {
+    document.getElementById('isbn-entries').innerHTML = addBookIsbns.map((i, idx) => `
+        <div class="isbn-entry">
+            <span class="isbn-entry-text">${esc(i.isbn)}</span>
+            <span class="tag">${esc(i.format)}</span>
+            <button class="isbn-remove" onclick="removeIsbnEntry(${idx})">×</button>
+        </div>`).join('');
+}
+
+function submitAddBook() {
+    const title = document.getElementById('add-title').value.trim();
+    const firstName = document.getElementById('add-first-name').value.trim();
+    const lastName  = document.getElementById('add-last-name').value.trim();
+    if (!title)          { showToast('Title is required'); return; }
+    if (!firstName && !lastName) { showToast('At least one author name is required'); return; }
+    const change = {
+        action:        'add_book',
+        title,
+        authors: [{ first_name: firstName, last_name: lastName, in_db: false }],
+        series_name:   document.getElementById('add-series').value.trim(),
+        series_number: document.getElementById('add-series-num').value.trim(),
+        universe:      '',
+        rating:        '',
+        publication_year: document.getElementById('add-year').value.trim(),
+        multiple:      false,
+        isbns:         [...addBookIsbns],
+    };
+    state.queue.push(change);
+    saveQueueToStorage();
+    updateQueueBadge();
+    showToast('Added to sync queue!');
+    showView('view-home');
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   PENDING QUEUE
+   ═════════════════════════════════════════════════════════════════ */
+function saveQueueToStorage() {
+    try { localStorage.setItem('btrt_queue', JSON.stringify(state.queue)); } catch(e) {}
+}
+
+function loadQueueFromStorage() {
+    try {
+        const saved = localStorage.getItem('btrt_queue');
+        if (saved) state.queue = JSON.parse(saved);
+    } catch(e) { state.queue = []; }
+}
+
+function updateQueueBadge() {
+    const row   = document.getElementById('queue-badge-row');
+    const count = document.getElementById('queue-count');
+    const header = document.getElementById('queue-header-count');
+    const n = state.queue.length;
+    row.style.display = n > 0 ? 'block' : 'none';
+    count.textContent = n;
+    if (header) header.textContent = `${n} book${n !== 1 ? 's' : ''}`;
+}
+
+function renderQueue() {
+    updateQueueBadge();
+    const list = document.getElementById('queue-list');
+    if (state.queue.length === 0) {
+        list.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">✓</div>
+                <p>No books waiting to sync</p>
+            </div>`;
+        return;
+    }
+    list.innerHTML = state.queue.map((b, i) => {
+        const author = b.authors && b.authors[0]
+            ? `${b.authors[0].first_name} ${b.authors[0].last_name}`.trim()
+            : 'Unknown Author';
+        return `
+        <div class="queue-item">
+            <div class="queue-item-info">
+                <div class="queue-item-title">${esc(b.title)}</div>
+                <div class="queue-item-author">${esc(author)}</div>
+                ${b.isbns && b.isbns.length ? `<div class="book-card-meta mt-4">${b.isbns.map(i => `<span class="tag">${esc(i.isbn)}</span>`).join('')}</div>` : ''}
+            </div>
+            <button class="queue-item-remove" onclick="removeFromQueue(${i})" title="Remove">×</button>
+        </div>`;
+    }).join('');
+}
+
+function removeFromQueue(idx) {
+    state.queue.splice(idx, 1);
+    saveQueueToStorage();
+    renderQueue();
+}
+
+async function syncQueueToDrive() {
+    if (state.queue.length === 0) { showToast('Nothing to sync'); return; }
+    const btn = document.getElementById('sync-btn');
+    const status = document.getElementById('sync-status');
+    btn.disabled = true;
+    btn.textContent = '⏳ Syncing...';
+    status.textContent = '';
+    status.className = 'sync-status';
+    try {
+        // Download existing pending_changes.json if there is one and merge
+        let existing = { version: 1, changes: [] };
+        try {
+            const fileId = await findFileInFolder(CONFIG.PENDING_FILENAME);
+            if (fileId) {
+                const buf = await downloadFileAsBuffer(fileId);
+                existing = JSON.parse(new TextDecoder().decode(buf));
+                if (!existing.changes) existing.changes = [];
+            }
+        } catch(e) {}
+        const merged = {
+            version:   1,
+            submitted: new Date().toISOString(),
+            changes:   [...existing.changes, ...state.queue]
+        };
+        await uploadJsonToDrive(CONFIG.PENDING_FILENAME, merged);
+        state.queue = [];
+        saveQueueToStorage();
+        renderQueue();
+        status.textContent = '✓ Synced successfully! Open the desktop app to apply.';
+        status.className = 'sync-status success';
+    } catch(e) {
+        status.textContent = 'Sync failed: ' + e.message;
+        status.className = 'sync-status error';
+    }
+    btn.disabled = false;
+    btn.textContent = '☁ Sync to Desktop';
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   UTILITY
+   ═════════════════════════════════════════════════════════════════ */
+function esc(s) {
+    if (s === null || s === undefined) return '';
+    return String(s)
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;');
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   INIT
+   ═════════════════════════════════════════════════════════════════ */
+window.addEventListener('load', () => {
+    // Wait for Google Identity Services to load
+    const waitForGIS = setInterval(() => {
+        if (window.google && window.google.accounts) {
+            clearInterval(waitForGIS);
+            initAuth();
+        }
+    }, 100);
+});
+</script>
+</body>
+</html>
 
