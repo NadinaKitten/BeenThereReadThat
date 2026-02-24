@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Been There Read That</title>
@@ -15,21 +16,21 @@
     <style>
         /* ── Variables ─────────────────────────────────────────────────────── */
         :root {
-            --bg:           #f9f4ec;
+            --bg:           #faf7ff;
             --surface:      #ffffff;
-            --surface-warm: #f2ebe0;
-            --brown:        #c203fc;
-            --brown-mid:    #7a4a30;
-            --accent:       #9b2335;
-            --accent-light: #c0392b;
-            --gold:         #b8860b;
-            --gold-light:   #d4a017;
-            --text:         #2c1a0e;
-            --text-mid:     #6b4c38;
-            --text-light:   #a07858;
-            --border:       #e0d4c3;
-            --shadow:       0 2px 12px rgba(61,35,20,0.10);
-            --shadow-lg:    0 8px 32px rgba(61,35,20,0.16);
+            --surface-warm: #f3eeff;
+            --brown:        #6a0080;
+            --brown-mid:    #9a10b8;
+            --accent:       #c203fc;
+            --accent-light: #d44ffe;
+            --gold:         #8e00a8;
+            --gold-light:   #c203fc;
+            --text:         #1a0022;
+            --text-mid:     #5a2070;
+            --text-light:   #9060a8;
+            --border:       #e0c8f0;
+            --shadow:       0 2px 12px rgba(194,3,252,0.10);
+            --shadow-lg:    0 8px 32px rgba(194,3,252,0.16);
             --radius:       14px;
             --radius-sm:    8px;
             --ff-display:   'Cormorant Garamond', Georgia, serif;
@@ -770,7 +771,6 @@
         <div class="auth-top">
             <div class="auth-icon">📚</div>
             <div class="auth-title">Been There<br>Read That</div>
-            <div class="auth-subtitle">Dixie's Library</div>
         </div>
         <div class="auth-bottom">
             <button class="btn btn-google" onclick="signIn()">
@@ -797,7 +797,7 @@
             <button class="header-action" onclick="showView('view-settings')">⚙</button>
         </div>
         <div class="home-welcome">
-            <p id="home-quip">What are we reading today?</p>
+            <p id="home-quip">No database loaded.</p>
         </div>
         <div class="home-actions">
             <div class="action-card" onclick="showView('view-search')">
@@ -980,11 +980,9 @@
    CONFIGURATION — fill these in before deploying
    ═════════════════════════════════════════════════════════════════ */
 const CONFIG = {
-    CLIENT_ID: '598152021591-fbv9t7ka6o2fsqcj5u7lrr19dcvd1e1n.apps.googleusercontent.com',
-    // Name of the Drive folder the desktop app uses:
+    CLIENT_ID: 'YOUR_WEB_APP_CLIENT_ID.apps.googleusercontent.com',
     DRIVE_FOLDER_NAME: 'BeenThereReadThat',
-    // Name of the current DB file uploaded by the desktop app:
-    CURRENT_DB_FILENAME: 'current_db.db',
+    METADATA_FILENAME: 'btrt_metadata.json',
     PENDING_FILENAME: 'pending_changes.json',
 };
 
@@ -994,11 +992,13 @@ const CONFIG = {
 const state = {
     accessToken: null,
     userEmail:   null,
-    db:          null,   // sql.js Database instance
-    SQL:         null,   // sql.js module
+    db:          null,
+    SQL:         null,
     folderId:    null,
-    queue:       [],     // pending changes array
-    scanResult:  null,   // last scanned ISBN result
+    queue:       [],
+    scanResult:  null,
+    dbFilename:  null,   // discovered from metadata.json
+    dbName:      null,   // human-readable name shown on home screen
 };
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1162,17 +1162,41 @@ async function startup() {
 async function loadDatabase() {
     setLoadingMsg('Downloading your library from Drive...');
     try {
-        const fileId = await findFileInFolder(CONFIG.CURRENT_DB_FILENAME);
-        if (!fileId) {
-            showToast('No library found on Drive. Ask desktop app to sync first.');
+        // Read metadata to find the current DB filename
+        const metaId = await findFileInFolder(CONFIG.METADATA_FILENAME);
+        if (!metaId) {
+            showToast('No library found on Drive. Close the desktop app to sync first.');
             state.db = null;
+            state.dbName = null;
+            updateHomeQuip();
+            return;
+        }
+        const metaBuf = await downloadFileAsBuffer(metaId);
+        const meta = JSON.parse(new TextDecoder().decode(metaBuf));
+        state.dbFilename = meta.db_filename;
+        state.dbName = meta.db_name || meta.db_filename;
+
+        const fileId = await findFileInFolder(state.dbFilename);
+        if (!fileId) {
+            showToast('Database file not found on Drive. Close the desktop app to sync.');
+            state.db = null;
+            updateHomeQuip();
             return;
         }
         const buffer = await downloadFileAsBuffer(fileId);
         state.db = new state.SQL.Database(new Uint8Array(buffer));
+        updateHomeQuip();
     } catch(e) {
         showToast('Could not load library: ' + e.message);
         state.db = null;
+        updateHomeQuip();
+    }
+}
+
+function updateHomeQuip() {
+    const el = document.getElementById('home-quip');
+    if (el) {
+        el.textContent = state.dbName ? state.dbName : 'No database loaded.';
     }
 }
 
@@ -1516,6 +1540,40 @@ function submitAddBook() {
     const lastName  = document.getElementById('add-last-name').value.trim();
     if (!title)          { showToast('Title is required'); return; }
     if (!firstName && !lastName) { showToast('At least one author name is required'); return; }
+
+    // Duplicate check against queue
+    const isDuplicate = state.queue.some(b =>
+        b.title.toLowerCase() === title.toLowerCase() &&
+        b.authors[0] &&
+        b.authors[0].last_name.toLowerCase() === lastName.toLowerCase()
+    );
+    if (isDuplicate) {
+        showToast('This book is already in your sync queue!');
+        return;
+    }
+
+    // Duplicate check against local DB
+    if (state.db) {
+        const existing = dbSearch(title).filter(b =>
+            b.title.toLowerCase() === title.toLowerCase()
+        );
+        if (existing.length > 0) {
+            // Book exists — but it may be a new edition with a new ISBN
+            // Keep the oldest publication year
+            const existingYear = existing[0].year ? parseInt(existing[0].year) : null;
+            const newYear = document.getElementById('add-year').value.trim();
+            const parsedNewYear = newYear ? parseInt(newYear) : null;
+            if (existingYear && parsedNewYear && parsedNewYear < existingYear) {
+                // New entry has an earlier year — flag it but still allow queue
+                showToast('Note: this appears to be an earlier edition. Adding ISBN only.');
+            } else if (addBookIsbns.length === 0) {
+                showToast('This book is already in your library. Add an ISBN to record a new edition.');
+                return;
+            }
+            // If they have ISBNs to add for a new format, allow it through
+        }
+    }
+
     const change = {
         action:        'add_book',
         title,
@@ -1657,4 +1715,3 @@ window.addEventListener('load', () => {
 </script>
 </body>
 </html>
-
