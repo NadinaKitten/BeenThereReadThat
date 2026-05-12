@@ -1032,7 +1032,7 @@ let tokenClient;
 function initAuth() {
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CONFIG.CLIENT_ID,
-        scope: 'https://www.googleapis.com/auth/drive.file email profile',
+        scope: 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file email profile',
         callback: async (resp) => {
             if (resp.error) { showToast('Sign in failed: ' + resp.error); return; }
             state.accessToken = resp.access_token;
@@ -1076,7 +1076,11 @@ async function gFetch(url, options = {}) {
             ...(options.headers || {})
         }
     });
-    if (!resp.ok) throw new Error(`Drive API error: ${resp.status}`);
+    if (!resp.ok) {
+        let detail = '';
+        try { const e = await resp.json(); detail = e.error?.message || ''; } catch {}
+        throw new Error(`Drive API ${resp.status}${detail ? ': ' + detail : ''}`);
+    }
     const ct = resp.headers.get('content-type') || '';
     if (ct.includes('application/json')) return resp.json();
     return resp;
