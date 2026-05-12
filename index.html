@@ -1396,14 +1396,14 @@ async function startScan() {
     try {
         codeReader = new ZXing.BrowserMultiFormatReader();
         const videoEl = document.getElementById('scan-video');
-        const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
+        const devices = (await navigator.mediaDevices.enumerateDevices())
+            .filter(d => d.kind === 'videoinput');
         // Prefer back camera
         const device = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
         const deviceId = device ? device.deviceId : undefined;
         codeReader.decodeFromVideoDevice(deviceId, videoEl, (result, err) => {
             if (result) {
                 const text = result.getText();
-                // Accept EAN-13 (ISBN-13) or ISBN-10 patterns
                 if (/^97[89]\d{10}$/.test(text) || /^\d{9}[\dX]$/.test(text)) {
                     handleScannedIsbn(text);
                 }
