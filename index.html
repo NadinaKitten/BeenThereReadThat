@@ -1516,9 +1516,12 @@ async function lookupIsbn(isbn) {
     try {
         const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
         const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Google Books API ${resp.status}`);
         const data = await resp.json();
         if (!data.items || data.items.length === 0) return null;
-        const info = data.items[0].volumeInfo;
+        const item = data.items[0];
+        const info = item.volumeInfo;
+        const sale = item.saleInfo || {};
         const authors = (info.authors || ['Unknown Author']).map(a => {
             const parts = a.trim().split(' ');
             return {
@@ -1528,14 +1531,16 @@ async function lookupIsbn(isbn) {
             };
         });
         return {
-            title:       info.title || '',
-            authors:     authors,
-            year:        info.publishedDate ? info.publishedDate.substring(0, 4) : '',
-            series_name: '',
+            title:         info.title || '',
+            authors,
+            year:          info.publishedDate ? info.publishedDate.substring(0, 4) : '',
+            series_name:   '',
             series_number: '',
-            universe:    '',
+            universe:      '',
+            format:        sale.isEbook ? 'ebook' : '',
         };
     } catch(e) {
+        console.warn('Google Books lookup failed:', e.message);
         return null;
     }
 }
@@ -1556,8 +1561,7 @@ function showAddBook(bookData, scannedIsbn = null) {
     const banner = document.getElementById('scan-source-banner');
     banner.style.display = scannedIsbn ? 'flex' : 'none';
     if (scannedIsbn) {
-        // Pre-populate first ISBN with scanned value
-        addBookIsbns = [{ isbn: scannedIsbn, format: 'paperback' }];
+        addBookIsbns = [{ isbn: scannedIsbn, format: bookData?.format || '' }];
     }
     document.getElementById('new-isbn').value = '';
     renderIsbnEntries();
