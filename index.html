@@ -1106,7 +1106,8 @@ async function getOrCreateFolder() {
 
 async function findFileInFolder(filename) {
     const folderId = await getOrCreateFolder();
-    const q = `name='${filename}' and '${folderId}' in parents and trashed=false`;
+    const escapedName = filename.replace(/'/g, "\\'");
+    const q = `name='${escapedName}' and '${folderId}' in parents and trashed=false`;
     const r = await gFetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`);
     return (r.files && r.files.length > 0) ? r.files[0].id : null;
 }
