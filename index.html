@@ -1108,7 +1108,10 @@ async function findFileInFolder(filename) {
 }
 
 async function downloadFileAsBuffer(fileId) {
-    const resp = await gFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+    const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { 'Authorization': 'Bearer ' + state.accessToken }
+    });
+    if (!resp.ok) throw new Error(`Drive API error: ${resp.status}`);
     return resp.arrayBuffer();
 }
 
