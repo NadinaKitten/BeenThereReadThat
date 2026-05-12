@@ -997,6 +997,7 @@ const CONFIG = {
     DRIVE_FOLDER_NAME: 'BeenThereReadThat',
     METADATA_FILENAME: 'btrt_metadata.json',
     PENDING_FILENAME: 'pending_changes.json',
+    BOOKS_API_KEY: 'AIzaSyCY_k8Waxa-P4jco_cX9ZjJMxcV2YQ4tQE',
 };
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1514,7 +1515,7 @@ function showScanResult({ inLibrary, dbBook, bookData, isbn, missingIsbn }) {
    ═════════════════════════════════════════════════════════════════ */
 async function lookupIsbn(isbn) {
     try {
-        const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
+        const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&key=${CONFIG.BOOKS_API_KEY}`;
         const resp = await fetch(url);
         if (!resp.ok) throw new Error(`Google Books API ${resp.status}`);
         const data = await resp.json();
