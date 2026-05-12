@@ -881,6 +881,19 @@
         <button class="scan-cancel" onclick="stopScan()">Cancel</button>
     </div>
 
+    <!-- ── Scan Result ──────────────────────────────────────────────────── -->
+    <div id="view-scan-result" class="view">
+        <div class="header">
+            <button class="header-back" onclick="showView('view-home')">‹</button>
+            <h1>Scan Result</h1>
+        </div>
+        <div class="content gap-2">
+            <div id="scan-result-status"></div>
+            <div id="scan-result-book-info" class="book-detail-hero" style="border-radius:var(--radius)"></div>
+            <div id="scan-result-actions" class="gap-2"></div>
+        </div>
+    </div>
+    
     <!-- ── Add Book ────────────────────────────────────────────────────────── -->
     <div id="view-add-book" class="view">
         <div class="header">
@@ -1422,37 +1435,78 @@ function stopScan() {
 
 async function handleScannedIsbn(isbn) {
     stopScan();
-    showToast('Scanned: ' + isbn);
+    showView('view-loading');
+    setLoadingMsg('Looking up book...');
 
-    // Check local DB first
     const localMatch = dbSearchByIsbn(isbn);
-    if (localMatch) {
-        showBookDetail(localMatch.ID, 'view-home');
-        return;
-    }
-
-    // Also check by title if Google Books gives us one
     const bookData = await lookupIsbn(isbn);
-    if (bookData) {
-        // Check if title exists in DB
+
+    if (localMatch) {
+        showScanResult({ inLibrary: true, dbBook: localMatch, bookData, isbn, missingIsbn: false });
+    } else if (bookData) {
         const titleResults = dbSearch(bookData.title);
         if (titleResults.length === 1) {
-            // Clear match by title — show it as found
-            showBookDetail(titleResults[0].ID, 'view-home');
-            return;
-        } else if (titleResults.length > 1) {
-            // Multiple possible matches — show search results
-            renderSearchResults(titleResults);
-            document.getElementById('search-input').value = bookData.title;
-            showView('view-search');
-            return;
+            // Found by title but ISBN not recorded — flag it
+            showScanResult({ inLibrary: true, dbBook: titleResults[0], bookData, isbn, missingIsbn: true });
+        } else {
+            showScanResult({ inLibrary: false, dbBook: null, bookData, isbn });
         }
-        // Not in library — offer to add
-        showAddBook(bookData, isbn);
     } else {
-        // ISBN lookup failed — offer manual add with just the ISBN
-        showAddBook(null, isbn);
+        showScanResult({ inLibrary: false, dbBook: null, bookData: null, isbn });
     }
+}
+
+function showScanResult({ inLibrary, dbBook, bookData, isbn, missingIsbn }) {
+    const title  = bookData?.title  || dbBook?.title  || 'Unknown Title';
+    const author = bookData?.authors?.[0]
+        ? `${bookData.authors[0].first_name} ${bookData.authors[0].last_name}`.trim()
+        : dbBook?.author_display || 'Unknown Author';
+    const year = bookData?.year || dbBook?.year || '';
+
+    // Status badge
+    const statusEl = document.getElementById('scan-result-status');
+    if (inLibrary) {
+        statusEl.innerHTML = `
+            <div class="in-library-badge" style="font-size:15px;padding:10px 16px;border-radius:var(--radius)">
+                ✓ &nbsp;In Your Library${missingIsbn ? ' — ISBN not yet recorded' : ''}
+            </div>`;
+    } else {
+        statusEl.innerHTML = `
+            <div class="not-in-library-badge" style="font-size:15px;padding:10px 16px;border-radius:var(--radius)">
+                ✕ &nbsp;Not in Your Library
+            </div>`;
+    }
+
+    // Book info card
+    document.getElementById('scan-result-book-info').innerHTML = `
+        <div class="book-detail-title">${esc(title)}</div>
+        <div class="book-detail-author">${esc(author)}</div>
+        <div class="book-detail-meta-row">
+            ${year ? `<span class="tag-light">${esc(year)}</span>` : ''}
+            <span class="tag-light">${esc(isbn)}</span>
+        </div>`;
+
+    // Action buttons
+    const actionsEl = document.getElementById('scan-result-actions');
+    if (inLibrary && !missingIsbn) {
+        actionsEl.innerHTML = `
+            <button class="btn btn-primary" onclick="showBookDetail(${dbBook.ID}, 'view-home')">View in Library</button>
+            <button class="btn btn-ghost"   onclick="showView('view-home')">Done</button>`;
+    } else if (inLibrary && missingIsbn) {
+        actionsEl.innerHTML = `
+            <button class="btn btn-primary" onclick="showBookDetail(${dbBook.ID}, 'view-home')">View in Library</button>
+            <button class="btn btn-secondary" onclick="showAddBook(${JSON.stringify(bookData).replace(/"/g, '&quot;')}, '${isbn}')">Add ISBN to Entry</button>
+            <button class="btn btn-ghost" onclick="showView('view-home')">Done</button>`;
+    } else {
+        actionsEl.innerHTML = `
+           <button class="btn btn-primary" onclick="showAddBook(window.scanResultBookData, '${isbn}')">Add to Library</button>
+            <button class="btn btn-ghost"   onclick="showView('view-home')">Cancel</button>`;
+    }
+
+    // Store bookData for the add button to reference without JSON-in-HTML escaping issues
+    window.scanResultBookData = bookData || null;
+
+    showView('view-scan-result');
 }
 
 /* ════════════════════════════════════════════════════════════════════
