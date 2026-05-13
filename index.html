@@ -1046,7 +1046,7 @@ let tokenClient;
 function initAuth() {
     tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CONFIG.CLIENT_ID,
-        scope: 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file email profile',
+        scope: 'https://www.googleapis.com/auth/drive.appdata email profile',
         callback: async (resp) => {
             if (resp.error) { showToast('Sign in failed: ' + resp.error); return; }
             state.accessToken = resp.access_token;
@@ -1101,28 +1101,16 @@ async function gFetch(url, options = {}) {
 }
 
 async function getOrCreateFolder() {
-    if (state.folderId) return state.folderId;
-    const name = CONFIG.DRIVE_FOLDER_NAME;
-    const q = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-    const r = await gFetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`);
-    if (r.files && r.files.length > 0) {
-        state.folderId = r.files[0].id;
-    } else {
-        const created = await gFetch('https://www.googleapis.com/drive/v3/files', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' })
-        });
-        state.folderId = created.id;
-    }
+    if (!state.folderId) state.folderId = 'appDataFolder';
     return state.folderId;
 }
 
 async function findFileInFolder(filename) {
-    const folderId = await getOrCreateFolder();
     const escapedName = filename.replace(/'/g, "\\'");
-    const q = `name='${escapedName}' and '${folderId}' in parents and trashed=false`;
-    const r = await gFetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`);
+    const q = `name='${escapedName}' and trashed=false`;
+    const r = await gFetch(
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&spaces=appDataFolder&fields=files(id)`
+    );
     return (r.files && r.files.length > 0) ? r.files[0].id : null;
 }
 
