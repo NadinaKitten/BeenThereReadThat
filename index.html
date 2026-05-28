@@ -677,6 +677,37 @@
             align-items: flex-start;
         }
 
+                /* ── Combobox dropdown ─────────────────────────────────────────────── */
+        .combobox-wrap { position: relative; }
+        .combobox-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0; right: 0;
+            background: var(--surface);
+            border: 1.5px solid var(--brown-mid);
+            border-top: none;
+            border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 200;
+            box-shadow: var(--shadow-lg);
+        }
+        .combobox-option {
+            padding: 10px 14px;
+            font-size: 15px;
+            cursor: pointer;
+            color: var(--text);
+            transition: background 0.1s;
+            border-bottom: 1px solid var(--border);
+        }
+        .combobox-option:last-child { border-bottom: none; }
+        .combobox-option:hover, .combobox-option.highlighted { background: var(--surface-warm); }
+        .combobox-option.none-option { color: var(--text-light); font-style: italic; }
+        .combobox-open .form-input {
+            border-color: var(--brown-mid);
+            border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+        }
+        
         /* ── Queue view ────────────────────────────────────────────────────── */
         .queue-item {
             background: var(--surface);
@@ -919,11 +950,23 @@
             </div>
             <div class="form-group">
                 <label class="form-label">Series Name</label>
-                <input id="add-series" class="form-input" type="text" placeholder="Leave blank if standalone">
+                <div class="combobox-wrap" id="series-combobox-wrap">
+                    <input id="add-series" class="form-input" type="text"
+                        placeholder="Select or type to filter…" autocomplete="off">
+                    <div id="add-series-dropdown" class="combobox-dropdown" style="display:none"></div>
+                </div>
             </div>
             <div class="form-group">
                 <label class="form-label">Series Number</label>
                 <input id="add-series-num" class="form-input" type="number" placeholder="e.g. 1">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Universe</label>
+                <div class="combobox-wrap" id="universe-combobox-wrap">
+                    <input id="add-universe" class="form-input" type="text"
+                        placeholder="Select or type to filter…" autocomplete="off">
+                    <div id="add-universe-dropdown" class="combobox-dropdown" style="display:none"></div>
+                </div>
             </div>
             <div class="form-group">
                 <label class="form-label">Publication Year</label>
@@ -1535,6 +1578,89 @@ async function lookupIsbn(isbn) {
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   COMBOBOX DROPDOWNS (Series & Universe)
+   ═════════════════════════════════════════════════════════════════ */
+ 
+function initComboBox(inputEl, dropdownEl, wrapEl, options) {
+    // options: [{id, name}, ...]
+    const allOptions = options; // "None" is handled by leaving the input blank
+ 
+    function render(filter) {
+        const f = (filter || '').toLowerCase().trim();
+        const filtered = allOptions.filter(o => !f || o.name.toLowerCase().includes(f));
+        const noneHtml = `<div class="combobox-option none-option" data-name="">— None —</div>`;
+        const optionsHtml = filtered.map(o =>
+            `<div class="combobox-option" data-name="${esc(o.name)}">${esc(o.name)}</div>`
+        ).join('');
+        dropdownEl.innerHTML = noneHtml + optionsHtml;
+ 
+        dropdownEl.querySelectorAll('.combobox-option').forEach(el => {
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                inputEl.value = el.dataset.name; // empty string for None
+                hideDropdown();
+            });
+        });
+    }
+ 
+    function showDropdown() {
+        render(inputEl.value);
+        dropdownEl.style.display = 'block';
+        wrapEl.classList.add('combobox-open');
+    }
+ 
+    function hideDropdown() {
+        dropdownEl.style.display = 'none';
+        wrapEl.classList.remove('combobox-open');
+    }
+ 
+    // Remove any previously attached listeners by cloning
+    const fresh = inputEl.cloneNode(true);
+    inputEl.parentNode.replaceChild(fresh, inputEl);
+    inputEl = fresh;
+ 
+    inputEl.addEventListener('focus', () => showDropdown());
+    inputEl.addEventListener('input', () => render(inputEl.value));
+    inputEl.addEventListener('blur',  () => setTimeout(hideDropdown, 160));
+ 
+    return inputEl; // return the (possibly new) element
+}
+ 
+function loadDropdownOptions() {
+    const seriesOptions = [];
+    const universeOptions = [];
+ 
+    if (state.db) {
+        try {
+            const s = state.db.prepare('SELECT ID, name FROM Series ORDER BY name COLLATE NOCASE');
+            while (s.step()) { const r = s.getAsObject(); seriesOptions.push({ id: r.ID, name: r.name }); }
+            s.free();
+        } catch(e) {}
+ 
+        try {
+            const u = state.db.prepare('SELECT ID, name FROM Universe ORDER BY name COLLATE NOCASE');
+            while (u.step()) { const r = u.getAsObject(); universeOptions.push({ id: r.ID, name: r.name }); }
+            u.free();
+        } catch(e) {}
+    }
+ 
+    const seriesWrap    = document.getElementById('series-combobox-wrap');
+    const seriesInput   = document.getElementById('add-series');
+    const seriesDrop    = document.getElementById('add-series-dropdown');
+    const universeWrap  = document.getElementById('universe-combobox-wrap');
+    const universeInput = document.getElementById('add-universe');
+    const universeDrop  = document.getElementById('add-universe-dropdown');
+ 
+    // Re-init (clones input to strip stale listeners; preserve current value)
+    const seriesVal   = seriesInput.value;
+    const universeVal = universeInput.value;
+    const newSeriesInput   = initComboBox(seriesInput,   seriesDrop,   seriesWrap,   seriesOptions);
+    const newUniverseInput = initComboBox(universeInput, universeDrop, universeWrap, universeOptions);
+    newSeriesInput.value   = seriesVal;
+    newUniverseInput.value = universeVal;
+}
+    
+/* ════════════════════════════════════════════════════════════════════
    ADD BOOK
    ═════════════════════════════════════════════════════════════════ */
 let addBookIsbns = [];
@@ -1546,6 +1672,7 @@ function showAddBook(bookData, scannedIsbn = null) {
     document.getElementById('add-last-name').value  = bookData && bookData.authors[0] ? bookData.authors[0].last_name  : '';
     document.getElementById('add-series').value     = bookData ? bookData.series_name    : '';
     document.getElementById('add-series-num').value = bookData ? bookData.series_number  : '';
+    document.getElementById('add-universe').value   = bookData ? (bookData.universe || '') : '';
     document.getElementById('add-year').value       = bookData ? bookData.year           : '';
     const banner = document.getElementById('scan-source-banner');
     banner.style.display = scannedIsbn ? 'flex' : 'none';
@@ -1635,7 +1762,7 @@ function submitAddBook() {
         authors: [{ first_name: firstName, last_name: lastName, in_db: false }],
         series_name:   document.getElementById('add-series').value.trim(),
         series_number: document.getElementById('add-series-num').value.trim(),
-        universe:      '',
+        universe:      document.getElementById('add-universe').value.trim(),
         rating:        '',
         publication_year: document.getElementById('add-year').value.trim(),
         multiple:      false,
