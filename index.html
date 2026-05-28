@@ -1680,6 +1680,7 @@ function showAddBook(bookData, scannedIsbn = null) {
         addBookIsbns = [{ isbn: scannedIsbn, format: bookData?.format || '' }];
     }
     document.getElementById('new-isbn').value = '';
+    loadDropdownOptions();
     renderIsbnEntries();
     showView('view-add-book');
 }
