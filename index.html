@@ -1744,37 +1744,71 @@ function showScanResult({ inLibrary, dbBook, bookData, isbn, missingIsbn }) {
 /* ════════════════════════════════════════════════════════════════════
    GOOGLE BOOKS API
    ═════════════════════════════════════════════════════════════════ */
+function splitAuthorName(a) {
+    const parts = String(a).trim().split(/\s+/);
+    return {
+        first_name: parts.slice(0, -1).join(' ') || a,
+        last_name:  parts.length > 1 ? parts[parts.length - 1] : '',
+        in_db: false
+    };
+}
+
+// Tries Google Books first, then Open Library (no key, different coverage).
+// Returns book data, or null if neither service has it.
 async function lookupIsbn(isbn) {
+    let googleFailed = false;
+
+    // ── 1. Google Books ────────────────────────────────────────────────
     try {
         const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&key=${CONFIG.BOOKS_API_KEY}`;
         const resp = await fetch(url);
         if (!resp.ok) throw new Error(`Google Books API ${resp.status}`);
         const data = await resp.json();
-        if (!data.items || data.items.length === 0) return null;
-        const item = data.items[0];
-        const info = item.volumeInfo;
-        const sale = item.saleInfo || {};
-        const authors = (info.authors || ['Unknown Author']).map(a => {
-            const parts = a.trim().split(' ');
+        if (data.items && data.items.length > 0) {
+            const item = data.items[0];
+            const info = item.volumeInfo || {};
+            const sale = item.saleInfo || {};
             return {
-                first_name: parts.slice(0, -1).join(' ') || a,
-                last_name:  parts.length > 1 ? parts[parts.length - 1] : '',
-                in_db: false
+                title:         info.title || '',
+                authors:       (info.authors || ['Unknown Author']).map(splitAuthorName),
+                year:          info.publishedDate ? info.publishedDate.substring(0, 4) : '',
+                series_name:   '',
+                series_number: '',
+                universe:      '',
+                format:        sale.isEbook ? 'ebook' : '',
             };
-        });
-        return {
-            title:         info.title || '',
-            authors,
-            year:          info.publishedDate ? info.publishedDate.substring(0, 4) : '',
-            series_name:   '',
-            series_number: '',
-            universe:      '',
-            format:        sale.isEbook ? 'ebook' : '',
-        };
+        }
     } catch(e) {
+        googleFailed = true;
         console.warn('Google Books lookup failed:', e.message);
-        return null;
     }
+
+    // ── 2. Open Library fallback ───────────────────────────────────────
+    try {
+        const resp = await fetch(
+            `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
+        if (!resp.ok) throw new Error(`Open Library ${resp.status}`);
+        const data = await resp.json();
+        const info = data[`ISBN:${isbn}`];
+        if (info && info.title) {
+            const yearMatch = (info.publish_date || '').match(/\d{4}/);
+            return {
+                title:         info.subtitle ? `${info.title}: ${info.subtitle}` : info.title,
+                authors:       (info.authors && info.authors.length
+                                   ? info.authors.map(a => a.name)
+                                   : ['Unknown Author']).map(splitAuthorName),
+                year:          yearMatch ? yearMatch[0] : '',
+                series_name:   '',
+                series_number: '',
+                universe:      '',
+                format:        '',
+            };
+        }
+    } catch(e) {
+        console.warn('Open Library lookup failed:', e.message);
+        if (googleFailed) showToast('Book lookup unavailable right now — enter details manually.');
+    }
+    return null;
 }
 
 /* ════════════════════════════════════════════════════════════════════
