@@ -946,7 +946,7 @@
         <div class="content">
             <div id="scan-source-banner" class="from-scan-banner" style="display:none">
                 <span>📷</span>
-                <span>Details filled in from barcode scan. Review and confirm below.</span>
+                <span id="scan-banner-text">Details filled in from barcode scan. Review and confirm below.</span>
             </div>
             <div class="form-group">
                 <label class="form-label">Title *</label>
@@ -997,6 +997,9 @@
                     </select>
                     <button class="btn btn-secondary btn-sm" onclick="addIsbnEntry()" style="flex-shrink:0">Add</button>
                 </div>
+                <button id="isbn-lookup-btn" class="btn btn-ghost btn-sm mt-4" style="width:100%" onclick="lookupTypedIsbn()">
+                    🔎 Look up details from this ISBN
+                </button>
             </div>
             <div class="divider"></div>
             <div class="gap-2">
@@ -1636,24 +1639,65 @@ function showBookDetail(bookId, backView) {
    ═════════════════════════════════════════════════════════════════ */
 let codeReader = null;
 
+let lastNonIsbnToast = 0;
+
+function isValidIsbn(text) {
+    if (/^97[89]\d{10}$/.test(text)) {            // ISBN-13: check digit
+        let sum = 0;
+        for (let i = 0; i < 12; i++) sum += parseInt(text[i], 10) * (i % 2 ? 3 : 1);
+        return (10 - (sum % 10)) % 10 === parseInt(text[12], 10);
+    }
+    return /^\d{9}[\dX]$/.test(text);              // ISBN-10 (format only)
+}
+
+function onBarcodeRead(result) {
+    if (!result) return;
+    const text = result.getText();
+    if (isValidIsbn(text)) {
+        handleScannedIsbn(text);
+        return;
+    }
+    // Something was read, but it's not an ISBN (e.g. a store UPC or the
+    // 5-digit price add-on). Tell the user, at most every 3 seconds.
+    const now = Date.now();
+    if (now - lastNonIsbnToast > 3000) {
+        lastNonIsbnToast = now;
+        showToast('Read a barcode, but not an ISBN. Try the one starting 978.');
+    }
+}
+
 async function startScan() {
     showView('view-scan');
     try {
-        codeReader = new ZXing.BrowserMultiFormatReader();
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+            ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+            ZXing.BarcodeFormat.UPC_A,  ZXing.BarcodeFormat.UPC_E,
+            ZXing.BarcodeFormat.CODE_128,
+        ]);
+        codeReader = new ZXing.BrowserMultiFormatReader(hints, 250);
         const videoEl = document.getElementById('scan-video');
-        const devices = (await navigator.mediaDevices.enumerateDevices())
-            .filter(d => d.kind === 'videoinput');
-        // Prefer back camera
-        const device = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
-        const deviceId = device ? device.deviceId : undefined;
-        codeReader.decodeFromVideoDevice(deviceId, videoEl, (result, err) => {
-            if (result) {
-                const text = result.getText();
-                if (/^97[89]\d{10}$/.test(text) || /^\d{9}[\dX]$/.test(text)) {
-                    handleScannedIsbn(text);
+
+        try {
+            // Rear camera at higher resolution — helps with small or worn barcodes
+            await codeReader.decodeFromConstraints({
+                audio: false,
+                video: {
+                    facingMode: { ideal: 'environment' },
+                    width:  { ideal: 1920 },
+                    height: { ideal: 1080 },
                 }
-            }
-        });
+            }, videoEl, (result) => onBarcodeRead(result));
+        } catch(e) {
+            // Fall back to picking a camera by label (previous behaviour)
+            console.warn('Constraint-based scan failed, falling back:', e.message);
+            const devices = (await navigator.mediaDevices.enumerateDevices())
+                .filter(d => d.kind === 'videoinput');
+            const device = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
+            codeReader.decodeFromVideoDevice(device ? device.deviceId : undefined, videoEl,
+                (result) => onBarcodeRead(result));
+        }
     } catch(e) {
         showToast('Camera not available: ' + e.message);
         showView('view-home');
@@ -1689,10 +1733,13 @@ async function handleScannedIsbn(isbn) {
 }
 
 function showScanResult({ inLibrary, dbBook, bookData, isbn, missingIsbn }) {
-    const title  = bookData?.title  || dbBook?.title  || 'Unknown Title';
+    const noDetails = !bookData && !dbBook;   // not in library AND no lookup service knew it
+    const title  = bookData?.title  || dbBook?.title  || 'No details found';
     const author = bookData?.authors?.[0]
         ? `${bookData.authors[0].first_name} ${bookData.authors[0].last_name}`.trim()
-        : dbBook?.author_display || 'Unknown Author';
+        : dbBook?.author_display || (noDetails
+            ? 'Neither Google Books nor Open Library has this ISBN. You can enter the details yourself — the ISBN will be saved with the book.'
+            : 'Unknown Author');
     const year = bookData?.year || dbBook?.year || '';
 
     // Status badge
@@ -1731,7 +1778,7 @@ function showScanResult({ inLibrary, dbBook, bookData, isbn, missingIsbn }) {
             <button class="btn btn-ghost" onclick="showView('view-home')">Done</button>`;
     } else {
         actionsEl.innerHTML = `
-           <button class="btn btn-primary" onclick="showAddBook(window.scanResultBookData, '${isbn}')">Add to Library</button>
+           <button class="btn btn-primary" onclick="showAddBook(window.scanResultBookData, '${isbn}')">${noDetails ? '✏️ Enter Details Manually' : 'Add to Library'}</button>
             <button class="btn btn-ghost"   onclick="showView('view-home')">Cancel</button>`;
     }
 
@@ -1915,6 +1962,9 @@ function showAddBook(bookData, scannedIsbn = null) {
     document.getElementById('add-year').value       = bookData ? bookData.year           : '';
     const banner = document.getElementById('scan-source-banner');
     banner.style.display = scannedIsbn ? 'flex' : 'none';
+    document.getElementById('scan-banner-text').textContent = bookData
+        ? 'Details filled in from barcode scan. Review and confirm below.'
+        : 'No details were found for this barcode. Fill them in below — the ISBN is saved with the book.';
     if (scannedIsbn) {
         addBookIsbns = [{ isbn: scannedIsbn, format: bookData?.format || '' }];
     }
@@ -1940,6 +1990,56 @@ function addIsbnEntry() {
     addBookIsbns.push({ isbn: clean, format: fmt });
     document.getElementById('new-isbn').value = '';
     renderIsbnEntries();
+}
+
+// Looks up the ISBN typed in the box, fills any EMPTY title/author/year fields
+// (never overwrites what you've already typed), and adds the ISBN to the list.
+async function lookupTypedIsbn() {
+    const raw = document.getElementById('new-isbn').value.trim();
+    const fmt = document.getElementById('new-isbn-format').value;
+    if (!raw) { showToast('Type an ISBN first'); return; }
+    const clean = raw.replace(/[\s-]/g, '').toUpperCase();
+    if (!isValidIsbn(clean)) {
+        showToast('That doesn\'t look like a valid ISBN');
+        return;
+    }
+
+    const btn = document.getElementById('isbn-lookup-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Looking up…';
+    let data = null;
+    try {
+        data = await lookupIsbn(clean);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔎 Look up details from this ISBN';
+    }
+
+    // Keep the ISBN either way — it's what you typed it for
+    if (!addBookIsbns.find(i => i.isbn === clean)) {
+        addBookIsbns.push({ isbn: clean, format: fmt || data?.format || '' });
+    }
+    document.getElementById('new-isbn').value = '';
+    renderIsbnEntries();
+
+    if (!data) {
+        showToast('No details found for that ISBN. Fill them in by hand.');
+        return;
+    }
+
+    const fill = (id, value) => {
+        const el = document.getElementById(id);
+        if (el && !el.value.trim() && value) { el.value = value; return true; }
+        return false;
+    };
+    const a = data.authors && data.authors[0];
+    const filled = [
+        fill('add-title',      data.title),
+        fill('add-first-name', a ? a.first_name : ''),
+        fill('add-last-name',  a ? a.last_name  : ''),
+        fill('add-year',       data.year),
+    ].some(Boolean);
+    showToast(filled ? 'Details filled in — please review.' : 'Found it, but your fields were already filled.');
 }
 
 function removeIsbnEntry(idx) {
