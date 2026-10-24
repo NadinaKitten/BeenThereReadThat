@@ -821,6 +821,17 @@
         </div>
     </div>
 
+    <!-- ── Library Picker ──────────────────────────────────────────────────── -->
+    <div id="view-db-picker" class="view">
+        <div class="header">
+            <button class="header-back" onclick="showView('view-home')">‹</button>
+            <h1>Choose a Library</h1>
+        </div>
+        <div class="content">
+            <div id="db-picker-list" class="results-list"></div>
+        </div>
+    </div>
+
     <!-- ── Home ────────────────────────────────────────────────────────────── -->
     <div id="view-home" class="view">
         <div class="header">
@@ -829,6 +840,7 @@
         </div>
         <div class="home-welcome">
             <p id="home-quip">No database loaded.</p>
+            <button id="switch-library-btn" class="header-action" style="display:none;margin-top:10px;color:var(--brown);border-color:var(--border)" onclick="showLibraryPicker()">📚 Switch Library</button>
         </div>
         <div class="home-actions">
             <div class="action-card" onclick="showView('view-search')">
@@ -1023,7 +1035,12 @@
                 <div class="detail-label">Signed in as</div>
                 <div class="detail-value" id="settings-email">—</div>
             </div>
+            <div class="detail-section">
+                <div class="detail-label">Current library</div>
+                <div class="detail-value" id="settings-db-name">—</div>
+            </div>
             <div class="divider"></div>
+            <button class="btn btn-secondary" onclick="showLibraryPicker()">📚 Switch Library</button>
             <button class="btn btn-secondary" onclick="refreshDatabase()">🔄 Reload Database from Drive</button>
             <button class="btn btn-danger" onclick="signOut()">Sign Out</button>
         </div>
@@ -1038,8 +1055,14 @@
 const CONFIG = {
     CLIENT_ID: '598152021591-fbv9t7ka6o2fsqcj5u7lrr19dcvd1e1n.apps.googleusercontent.com',
     DRIVE_FOLDER_NAME: 'BeenThereReadThat',
-    METADATA_FILENAME: 'btrt_metadata.json',
-    PENDING_FILENAME: 'pending_changes.json',
+    // Metadata and pending-changes files are now per-database:
+    //   btrt_metadata_{db_name}.json / pending_changes_{db_name}.json
+    // The legacy single-file names are kept as read/fallback only, for
+    // anything synced before multi-database support existed.
+    META_PREFIX: 'btrt_metadata_',
+    LEGACY_METADATA_FILENAME: 'btrt_metadata.json',
+    PENDING_PREFIX: 'pending_changes_',
+    LEGACY_PENDING_FILENAME: 'pending_changes.json',
     BOOKS_API_KEY: 'AIzaSyCY_k8Waxa-P4jco_cX9ZjJMxcV2YQ4tQE',
 };
 
@@ -1054,8 +1077,8 @@ const state = {
     folderId:    null,
     queue:       [],
     scanResult:  null,
-    dbFilename:  null,   // discovered from metadata.json
-    dbName:      null,   // human-readable name shown on home screen
+    databases:   [],     // every {dbFilename, dbName, dbExists, backupCount, lastSync} on Drive
+    currentDb:   null,   // {dbName, dbFilename} of the database currently loaded
 };
 
 /* ════════════════════════════════════════════════════════════════════
@@ -1111,6 +1134,8 @@ function signOut() {
     state.userEmail = null;
     state.db = null;
     state.folderId = null;
+    state.databases = [];
+    state.currentDb = null;
     showView('view-auth');
 }
 
@@ -1193,7 +1218,162 @@ async function uploadJsonToDrive(filename, data) {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   STARTUP — load sql.js + download DB
+   MULTI-DATABASE DISCOVERY
+   Mirrors Drive.py's list_drive_databases(): finds every database on
+   Drive via its per-db metadata file (btrt_metadata_{db_name}.json),
+   plus a second pass for bare .db files with no metadata yet (or the
+   legacy single btrt_metadata.json), so nothing gets hidden.
+   ═════════════════════════════════════════════════════════════════ */
+async function listAllDriveFiles() {
+    let files = [];
+    let pageToken = null;
+    do {
+        const params = new URLSearchParams({
+            spaces: 'appDataFolder',
+            fields: 'nextPageToken, files(id, name)',
+            pageSize: '1000'
+        });
+        if (pageToken) params.set('pageToken', pageToken);
+        const r = await gFetch(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
+        files = files.concat(r.files || []);
+        pageToken = r.nextPageToken || null;
+    } while (pageToken);
+    return files;
+}
+
+async function discoverDatabases() {
+    const allFiles = await listAllDriveFiles();
+    const metaFiles = allFiles.filter(f =>
+        (f.name.startsWith(CONFIG.META_PREFIX) && f.name.endsWith('.json')) ||
+        f.name === CONFIG.LEGACY_METADATA_FILENAME
+    );
+    const databases = [];
+    const seenNames = new Set();
+
+    // Pass 1: databases that have a metadata file
+    for (const mf of metaFiles) {
+        try {
+            const buf = await downloadFileAsBuffer(mf.id);
+            const meta = JSON.parse(new TextDecoder().decode(buf));
+            const dbFilename = meta.db_filename || '';
+            const dbName = meta.db_name || '';
+            if (!dbName || seenNames.has(dbName)) continue; // skip blank/duplicate (legacy + per-db)
+            seenNames.add(dbName);
+            const dbExists = allFiles.some(f => f.name === dbFilename);
+            const backupPrefix = `${dbName}_backup_`;
+            const backupCount = allFiles.filter(f =>
+                f.name.startsWith(backupPrefix) && f.name.endsWith('.db')).length;
+            databases.push({ dbFilename, dbName, dbExists, backupCount, lastSync: meta.last_sync || null });
+        } catch(e) { /* skip corrupt/unreadable metadata */ }
+    }
+
+    // Pass 2: plain .db files on Drive with no metadata yet
+    for (const f of allFiles) {
+        const name = f.name || '';
+        if (!name.endsWith('.db') || name.includes('_backup_')) continue;
+        const dbName = name.slice(0, -3);
+        if (seenNames.has(dbName)) continue;
+        seenNames.add(dbName);
+        const backupPrefix = `${dbName}_backup_`;
+        const backupCount = allFiles.filter(f2 =>
+            f2.name.startsWith(backupPrefix) && f2.name.endsWith('.db')).length;
+        databases.push({ dbFilename: name, dbName, dbExists: true, backupCount, lastSync: null });
+    }
+
+    databases.sort((a, b) => (b.lastSync || '').localeCompare(a.lastSync || ''));
+    return databases;
+}
+
+async function loadDatabases() {
+    try {
+        state.databases = await discoverDatabases();
+    } catch(e) {
+        showToast('Could not list libraries: ' + e.message);
+        state.databases = [];
+    }
+}
+
+function dbMemoryKey() {
+    return 'btrt_last_db_' + (state.userEmail || 'anon');
+}
+function rememberDbName(name) {
+    try { localStorage.setItem(dbMemoryKey(), name); } catch(e) {}
+}
+function getRememberedDbName() {
+    try { return localStorage.getItem(dbMemoryKey()); } catch(e) { return null; }
+}
+
+async function selectDatabase(dbEntry) {
+    showView('view-loading');
+    setLoadingMsg(`Downloading ${dbEntry.dbName}...`);
+    try {
+        const fileId = await findFileInFolder(dbEntry.dbFilename);
+        if (!fileId) {
+            showToast(`"${dbEntry.dbName}" not found on Drive.`);
+            return;
+        }
+        const buffer = await downloadFileAsBuffer(fileId);
+        state.db = new state.SQL.Database(new Uint8Array(buffer));
+        state.currentDb = { dbName: dbEntry.dbName, dbFilename: dbEntry.dbFilename };
+        rememberDbName(dbEntry.dbName);
+        updateHomeQuip();
+    } catch(e) {
+        showToast('Could not load library: ' + e.message);
+        state.db = null;
+        state.currentDb = null;
+        updateHomeQuip();
+    }
+}
+
+async function showLibraryPicker() {
+    showView('view-loading');
+    setLoadingMsg('Loading your libraries...');
+    await loadDatabases();
+    if (state.databases.length === 0) {
+        showToast('No libraries found on Drive.');
+        showView('view-home');
+        return;
+    }
+    renderDbPicker();
+    showView('view-db-picker');
+}
+
+function renderDbPicker() {
+    const container = document.getElementById('db-picker-list');
+    if (state.databases.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">📚</div>
+                <p>No libraries found on Drive</p>
+            </div>`;
+        return;
+    }
+    container.innerHTML = state.databases.map((d, idx) => `
+        <div class="book-card" data-db-idx="${idx}">
+            <div class="book-card-title">${esc(d.dbName)}${state.currentDb && state.currentDb.dbName === d.dbName ? ' ✓' : ''}</div>
+            <div class="book-card-meta">
+                ${d.lastSync ? `<span class="tag">Synced ${esc(new Date(d.lastSync).toLocaleDateString())}</span>` : `<span class="tag">Not yet synced from desktop</span>`}
+                ${d.backupCount ? `<span class="tag">${d.backupCount} backup${d.backupCount !== 1 ? 's' : ''}</span>` : ''}
+                ${!d.dbExists ? `<span class="tag tag-accent">File missing</span>` : ''}
+            </div>
+        </div>`).join('');
+    container.querySelectorAll('.book-card').forEach(card => {
+        card.addEventListener('click', () => {
+            chooseDatabaseByIndex(parseInt(card.dataset.dbIdx, 10));
+        });
+    });
+}
+
+async function chooseDatabaseByIndex(idx) {
+    const entry = state.databases[idx];
+    if (!entry) return;
+    if (!entry.dbExists) { showToast('That database file is missing from Drive.'); return; }
+    await selectDatabase(entry);
+    showView('view-home');
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   STARTUP — load sql.js + discover/select database
    ═════════════════════════════════════════════════════════════════ */
 async function startup() {
     showView('view-loading');
@@ -1207,55 +1387,75 @@ async function startup() {
         showView('view-auth');
         return;
     }
-    await loadDatabase();
     loadQueueFromStorage();
-    showView('view-home');
-}
 
-async function loadDatabase() {
-    setLoadingMsg('Downloading your library from Drive...');
-    try {
-        // Read metadata to find the current DB filename
-        const metaId = await findFileInFolder(CONFIG.METADATA_FILENAME);
-        if (!metaId) {
-            showToast('No library found on Drive. Close the desktop app to sync first.');
-            state.db = null;
-            state.dbName = null;
-            updateHomeQuip();
-            return;
-        }
-        const metaBuf = await downloadFileAsBuffer(metaId);
-        const meta = JSON.parse(new TextDecoder().decode(metaBuf));
-        state.dbFilename = meta.db_filename;
-        state.dbName = meta.db_name || meta.db_filename;
+    setLoadingMsg('Checking your libraries on Drive...');
+    await loadDatabases();
 
-        const fileId = await findFileInFolder(state.dbFilename);
-        if (!fileId) {
-            showToast('Database file not found on Drive. Close the desktop app to sync.');
-            state.db = null;
-            updateHomeQuip();
-            return;
-        }
-        const buffer = await downloadFileAsBuffer(fileId);
-        state.db = new state.SQL.Database(new Uint8Array(buffer));
-        updateHomeQuip();
-    } catch(e) {
-        showToast('Could not load library: ' + e.message);
+    if (state.databases.length === 0) {
+        showToast('No library found on Drive. Close the desktop app to sync first.');
         state.db = null;
+        state.currentDb = null;
         updateHomeQuip();
+        showView('view-home');
+        return;
+    }
+
+    if (state.databases.length === 1) {
+        await selectDatabase(state.databases[0]);
+        showView('view-home');
+        return;
+    }
+
+    // Multiple databases: use the last one this user picked, if it still exists
+    const remembered = getRememberedDbName();
+    const rememberedEntry = remembered && state.databases.find(d => d.dbName === remembered && d.dbExists);
+    if (rememberedEntry) {
+        await selectDatabase(rememberedEntry);
+        showView('view-home');
+    } else {
+        renderDbPicker();
+        showView('view-db-picker');
     }
 }
 
 function updateHomeQuip() {
     const el = document.getElementById('home-quip');
+    const switchBtn = document.getElementById('switch-library-btn');
+    const settingsDbName = document.getElementById('settings-db-name');
     if (el) {
-        el.textContent = state.dbName ? state.dbName : 'No database loaded.';
+        el.textContent = state.currentDb ? state.currentDb.dbName : 'No library loaded.';
+    }
+    if (switchBtn) {
+        switchBtn.style.display = (state.databases && state.databases.length > 1) ? 'inline-flex' : 'none';
+    }
+    if (settingsDbName) {
+        settingsDbName.textContent = state.currentDb ? state.currentDb.dbName : 'None loaded';
     }
 }
 
 async function refreshDatabase() {
     showView('view-loading');
-    await loadDatabase();
+    if (!state.currentDb) {
+        setLoadingMsg('Loading your libraries...');
+        await loadDatabases();
+        if (state.databases.length === 1) {
+            await selectDatabase(state.databases[0]);
+            showView('view-home');
+            showToast('Library refreshed!');
+        } else if (state.databases.length > 1) {
+            renderDbPicker();
+            showView('view-db-picker');
+        } else {
+            showToast('No library found on Drive.');
+            showView('view-home');
+        }
+        return;
+    }
+    setLoadingMsg('Refreshing ' + state.currentDb.dbName + '...');
+    await loadDatabases(); // pick up any rename/backup changes made on desktop
+    const entry = state.databases.find(d => d.dbName === state.currentDb.dbName) || state.currentDb;
+    await selectDatabase(entry);
     showView('view-home');
     showToast('Library refreshed!');
 }
@@ -1666,6 +1866,11 @@ function loadDropdownOptions() {
 let addBookIsbns = [];
 
 function showAddBook(bookData, scannedIsbn = null) {
+    if (!state.currentDb) {
+        showToast('Choose a library first.');
+        showLibraryPicker();
+        return;
+    }
     addBookIsbns = [];
     document.getElementById('add-title').value      = bookData ? bookData.title : '';
     document.getElementById('add-first-name').value = bookData && bookData.authors[0] ? bookData.authors[0].first_name : '';
@@ -1724,8 +1929,10 @@ function submitAddBook() {
     if (!title)          { showToast('Title is required'); return; }
     if (!firstName && !lastName) { showToast('At least one author name is required'); return; }
 
-    // Duplicate check against queue
+    // Duplicate check against queue (scoped to this database — the same title
+    // can legitimately be queued once per library)
     const isDuplicate = state.queue.some(b =>
+        b.db_name === state.currentDb.dbName &&
         b.title.toLowerCase() === title.toLowerCase() &&
         b.authors[0] &&
         b.authors[0].last_name.toLowerCase() === lastName.toLowerCase()
@@ -1759,6 +1966,7 @@ function submitAddBook() {
 
     const change = {
         action:        'add_book',
+        db_name:       state.currentDb.dbName,
         title,
         authors: [{ first_name: firstName, last_name: lastName, in_db: false }],
         series_name:   document.getElementById('add-series').value.trim(),
@@ -1820,7 +2028,10 @@ function renderQueue() {
             <div class="queue-item-info">
                 <div class="queue-item-title">${esc(b.title)}</div>
                 <div class="queue-item-author">${esc(author)}</div>
-                ${b.isbns && b.isbns.length ? `<div class="book-card-meta mt-4">${b.isbns.map(i => `<span class="tag">${esc(i.isbn)}</span>`).join('')}</div>` : ''}
+                <div class="book-card-meta mt-4">
+                    ${b.db_name ? `<span class="tag tag-accent">${esc(b.db_name)}</span>` : ''}
+                    ${b.isbns && b.isbns.length ? b.isbns.map(i => `<span class="tag">${esc(i.isbn)}</span>`).join('') : ''}
+                </div>
             </div>
             <button class="queue-item-remove" onclick="removeFromQueue(${i})" title="Remove">×</button>
         </div>`;
@@ -1841,32 +2052,64 @@ async function syncQueueToDrive() {
     btn.textContent = '⏳ Syncing...';
     status.textContent = '';
     status.className = 'sync-status';
-    try {
-        // Download existing pending_changes.json if there is one and merge
-        let existing = { version: 1, changes: [] };
+
+    // Changes are written to Drive per-database (pending_changes_{db_name}.json)
+    // so the desktop app only ever applies a change to the library it was
+    // queued against — never to whichever database happens to be open locally.
+    // Anything queued before databases were tagged (db_name missing) falls
+    // back to the legacy shared file.
+    const groups = {};
+    for (const change of state.queue) {
+        const key = change.db_name || '__legacy__';
+        (groups[key] = groups[key] || []).push(change);
+    }
+
+    const succeeded = [];
+    const failed = [];
+
+    for (const key of Object.keys(groups)) {
+        const changes = groups[key];
+        const filename = key === '__legacy__'
+            ? CONFIG.LEGACY_PENDING_FILENAME
+            : `${CONFIG.PENDING_PREFIX}${key}.json`;
         try {
-            const fileId = await findFileInFolder(CONFIG.PENDING_FILENAME);
-            if (fileId) {
-                const buf = await downloadFileAsBuffer(fileId);
-                existing = JSON.parse(new TextDecoder().decode(buf));
-                if (!existing.changes) existing.changes = [];
-            }
-        } catch(e) {}
-        const merged = {
-            version:   1,
-            submitted: new Date().toISOString(),
-            changes:   [...existing.changes, ...state.queue]
-        };
-        await uploadJsonToDrive(CONFIG.PENDING_FILENAME, merged);
-        state.queue = [];
-        saveQueueToStorage();
-        renderQueue();
+            let existing = { version: 1, changes: [] };
+            try {
+                const fileId = await findFileInFolder(filename);
+                if (fileId) {
+                    const buf = await downloadFileAsBuffer(fileId);
+                    existing = JSON.parse(new TextDecoder().decode(buf));
+                    if (!existing.changes) existing.changes = [];
+                }
+            } catch(e) {}
+            const merged = {
+                version:   1,
+                submitted: new Date().toISOString(),
+                changes:   [...existing.changes, ...changes]
+            };
+            await uploadJsonToDrive(filename, merged);
+            succeeded.push(key);
+        } catch(e) {
+            failed.push(key);
+        }
+    }
+
+    // Drop only the changes that made it to Drive; keep failed groups queued for retry
+    state.queue = state.queue.filter(c => failed.includes(c.db_name || '__legacy__'));
+    saveQueueToStorage();
+    renderQueue();
+
+    if (failed.length === 0) {
         status.textContent = '✓ Synced successfully! Open the desktop app to apply.';
         status.className = 'sync-status success';
-    } catch(e) {
-        status.textContent = 'Sync failed: ' + e.message;
+    } else {
+        const failNames = failed.map(k => k === '__legacy__' ? 'unassigned items' : k).join(', ');
+        status.textContent = succeeded.length
+            ? `Synced ${succeeded.length} librar${succeeded.length === 1 ? 'y' : 'ies'}. Failed: ${failNames}`
+            : `Sync failed for: ${failNames}`;
         status.className = 'sync-status error';
     }
+
     btn.disabled = false;
     btn.textContent = '☁ Sync to Desktop';
 }
